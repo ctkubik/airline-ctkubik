@@ -1221,6 +1221,18 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
 
 
 
+def check_named_fare_watches(conn: sqlite3.Connection) -> None:
+    """Run due multi-airline fare watches (Amadeus-based, browser-free)."""
+    try:
+        from lib.fare_watch import check_fare_watches
+        from notifications import send_notification
+
+        check_fare_watches(conn, notify_fn=send_notification)
+    except Exception as e:
+        logger.error("Fare watch check failed: %s", e)
+        add_log(conn, f"Fare watch check failed: {e}", "error")
+
+
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
     """Check for manual seat check requests and execute them."""
     # '_' is a single-character wildcard in LIKE — escape it so this matches
@@ -1387,6 +1399,9 @@ def main_loop() -> None:
 
             # Check for fare drops
             check_fares(conn)
+
+            # Check named multi-airline fare watches (no browser needed)
+            check_named_fare_watches(conn)
 
             # Attempt seat upgrades for A-List accounts (48h before departure)
             attempt_seat_upgrades(conn)

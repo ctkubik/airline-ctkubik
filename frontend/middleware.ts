@@ -8,6 +8,8 @@ function getSecret(): string | null {
   return null;
 }
 
+// Token format (must stay in sync with lib/auth.ts):
+// base64url(JSON{u, r, exp}) + "." + hex(HMAC-SHA256(payload))
 async function verifyToken(token: string): Promise<boolean> {
   const secret = getSecret();
   if (!secret) return false;
@@ -15,9 +17,6 @@ async function verifyToken(token: string): Promise<boolean> {
   const parts = token.split(".");
   if (parts.length !== 2) return false;
   const [payload, hmac] = parts;
-
-  const expiry = parseInt(payload, 10);
-  if (isNaN(expiry) || Date.now() > expiry) return false;
 
   // Use Web Crypto API (Edge-compatible)
   const encoder = new TextEncoder();
@@ -39,7 +38,15 @@ async function verifyToken(token: string): Promise<boolean> {
   for (let i = 0; i < expected.length; i++) {
     mismatch |= expected.charCodeAt(i) ^ hmac.charCodeAt(i);
   }
-  return mismatch === 0;
+  if (mismatch !== 0) return false;
+
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const data = JSON.parse(atob(base64));
+    return typeof data.exp === "number" && Date.now() <= data.exp;
+  } catch {
+    return false;
+  }
 }
 
 export async function middleware(request: NextRequest) {

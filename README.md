@@ -37,7 +37,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Account Monitoring**: Log in with your Southwest account to automatically track all reservations
 - **Display Names**: Assign friendly names to accounts for easy identification (e.g., "Mom", "Dad")
 - **A-List Support**: Flag accounts as A-List or A-List Preferred status
-- **Auto Seat Upgrade**: Enable automatic seat upgrade attempts 48 hours before departure for A-List accounts
+- **Auto Seat Upgrade** *(experimental — see [Seat Upgrades](#seat-upgrades-experimental))*: automatic seat upgrade attempts 48 hours before departure for A-List accounts
 - **Smart Deactivation**: Accounts only deactivate after 3 consecutive confirmed credential failures; transient errors are retried automatically
 
 ### Flight Tracking
@@ -46,6 +46,16 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Live Countdown Timers**: Real-time countdown to check-in time on every flight
 - **Status Tracking**: Pending, scheduled, checking_in, success, and failed states
 - **Assigned Seat Display**: Shows seat assignment after check-in (Southwest's new assigned seating model)
+
+### Fare Watches (any airline)
+- **Named searches**: Create a watch per trip — "Mom's visit in October", "Spring break to Florida"
+- **Multi-airline**: Checks fares across carriers via the free [Amadeus](https://developers.amadeus.com) flight-search API (Southwest fares are tracked natively by the rest of the app)
+- **Date windows**: Watch a whole departure/return window, not just one date
+- **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
+
+### Multi-User Login
+- **User accounts**: Admins create accounts for family members (member or admin role)
+- **Safe for a public URL**: bcrypt-hashed passwords, signed HttpOnly session cookies, no default credentials
 
 ### Fare Monitoring
 - **Automatic Fare Checks**: Checks for fare drops every 4 hours using fresh session tokens
@@ -144,7 +154,12 @@ All application state (database, capture files, generated credentials) lives in 
 The web UI listens on port 3000 on your machine. To reach it from your phone or another network, don't port-forward — use one of these free options:
 
 - **[Tailscale](https://tailscale.com)** (recommended): install it on the host machine and your phone/laptop. The dashboard becomes reachable at `http://<machine-name>:3000` from anywhere, with nothing exposed to the public internet.
-- **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)**: gives the app a public HTTPS URL on a domain you own while it keeps running at home.
+- **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)**: gives the app a public HTTPS URL on a domain you own while it keeps running at home. Built in:
+  1. In [Cloudflare Zero Trust](https://one.dash.cloudflare.com) go to **Networks > Tunnels > Create a tunnel** (Cloudflared type), and add a public hostname that points to `http://app:3000`
+  2. Copy the tunnel token into `.env` as `CLOUDFLARE_TUNNEL_TOKEN=...`
+  3. Start everything with `docker compose --profile tunnel up -d`
+
+  Before exposing a public URL, create real user accounts on the **Users** page so each family member has their own login.
 
 ### Option 2: Web App (Railway)
 
@@ -260,6 +275,26 @@ Configure preferences and notifications:
 - Add any notification service using Apprise URL format
 - **Send Test Notification** button to verify delivery (processed within 60 seconds)
 - Supports 100+ services including Telegram, Discord, Slack, email, SMS
+
+### Users (`/users`)
+Admin-only page to manage who can log in:
+- **Add users** with a username, password, display name (e.g. "Grandma"), and role
+- **Members** can use the whole dashboard except user management; **admins** can also manage users
+- **Reset passwords**, disable, or delete accounts
+- The `AUTH_USERNAME`/`AUTH_PASSWORD` pair from `.env` (or the auto-generated one) is a built-in break-glass admin login and is bootstrapped as the first admin account
+
+### Fare Watches (`/fare-watches`)
+Named multi-airline fare tracking for trips you're planning:
+
+1. Get free API keys: sign up at [developers.amadeus.com](https://developers.amadeus.com), create an app, and put `AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET` in `.env`
+2. Create a watch: name it (e.g. "Mom's visit in October"), set origin/destination airports and a departure window — optionally a return window, traveler count, nonstop-only, and a target price
+3. The worker checks each watch every 6 hours (`FARE_WATCH_INTERVAL_HOURS` to change) and records the cheapest fare found
+4. You get a notification (Telegram/SMS/etc. — same services as check-in alerts) when the price drops or a fare is found under your target
+
+Notes: the free Amadeus tier starts in a **test environment** with limited/cached data — good enough to try it; request (free) production keys in their dashboard for real coverage. Amadeus covers most airlines but **not Southwest**; Southwest fares are tracked natively on the Flights page.
+
+### Seat Upgrades (experimental)
+The A-List auto seat-upgrade automates Southwest's desktop website in a real browser. Southwest changes that site frequently, so this feature is fragile: it may fail to find the seat map and can report a seat as selected without Southwest actually confirming it. Failures no longer interfere with check-ins (the browser is always restored, attempts are rate-limited, and check-ins take absolute priority), but treat any "seat selected" notification as unconfirmed until you verify in the Southwest app. The capture/audit system records every attempt (screenshots + DOM) under the flight's captures to help debug. Leave the per-account toggle off if you don't want it attempted at all.
 
 ## CLI Usage
 

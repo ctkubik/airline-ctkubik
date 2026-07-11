@@ -122,6 +122,51 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             error_message TEXT,
             created_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            display_name TEXT DEFAULT '',
+            role TEXT NOT NULL DEFAULT 'member',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS fare_watches (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            name TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            destination TEXT NOT NULL,
+            depart_date_start TEXT NOT NULL,
+            depart_date_end TEXT NOT NULL,
+            return_date_start TEXT,
+            return_date_end TEXT,
+            adults INTEGER DEFAULT 1,
+            nonstop_only INTEGER DEFAULT 0,
+            max_price REAL,
+            is_active INTEGER DEFAULT 1,
+            created_by TEXT DEFAULT '',
+            last_checked_at TEXT,
+            last_error TEXT,
+            best_price REAL,
+            best_price_currency TEXT DEFAULT 'USD',
+            best_departure_date TEXT,
+            best_return_date TEXT,
+            best_airline TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS fare_watch_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            watch_id TEXT NOT NULL,
+            price REAL NOT NULL,
+            currency TEXT DEFAULT 'USD',
+            departure_date TEXT,
+            return_date TEXT,
+            airline TEXT,
+            details_json TEXT,
+            checked_at TEXT DEFAULT (datetime('now'))
+        );
         """
     )
 

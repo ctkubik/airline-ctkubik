@@ -160,7 +160,7 @@ export default function AccountsPage() {
               </div>
               <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
                 <div>
-                  <div className="text-sm font-medium">Auto Seat Upgrade</div>
+                  <div className="text-sm font-medium">Auto Seat Upgrade (experimental)</div>
                   <div className="text-xs text-gray-400">
                     Attempt seat upgrade 48h before departure
                   </div>
