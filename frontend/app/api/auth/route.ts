@@ -1,5 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateUser, createToken, getSessionUser, authConfigError } from "@/lib/auth";
+import { isRateLimited, recordFailure, recordSuccess, clientIp } from "@/lib/rate-limit";
+import { getDb } from "@/lib/db";
+
+function logAuthEvent(message: string, level: "info" | "warning") {
+  try {
+    getDb()
+      .prepare("INSERT INTO worker_logs (level, message) VALUES (?, ?)")
+      .run(level, message);
+  } catch {
+    // never fail a login over a log write
+  }
+}
 
 export async function POST(req: NextRequest) {
   const configError = authConfigError();
@@ -12,10 +24,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Username and password required" }, { status: 400 });
   }
 
+  const ip = clientIp(req.headers);
+  const rlKey = `${ip}:${username.toLowerCase()}`;
+  const rl = isRateLimited(rlKey);
+  if (rl.limited) {
+    logAuthEvent(`Login rate-limited for '${username}' from ${ip}`, "warning");
+    return NextResponse.json(
+      { error: `Too many failed attempts. Try again in ${Math.ceil(rl.retryAfterSec / 60)} minutes.` },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } }
+    );
+  }
+
   const user = authenticateUser(username, password);
   if (!user) {
+    recordFailure(rlKey);
+    logAuthEvent(`Failed login for '${username}' from ${ip}`, "warning");
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
+  recordSuccess(rlKey);
+  logAuthEvent(`Login: ${user.username} (${user.role}) from ${ip}`, "info");
 
   const token = createToken(user);
   const response = NextResponse.json({ ok: true, user });

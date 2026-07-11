@@ -155,6 +155,10 @@ docker compose up -d
 ```
 (Changes to `.env` always need `docker compose up -d` to take effect.)
 
+> **Heads up**: `AUTH_SECRET` also encrypts your stored Southwest passwords.
+> If you ever change it, log back in and re-enter your Southwest account
+> passwords on the Accounts page.
+
 ## Part 4: First-time setup in the app
 
 1. **Add your Southwest account** — Accounts page → enter your Southwest
@@ -174,7 +178,11 @@ docker compose up -d
 3. **Create logins for your family** — Users page → Add User. Give each person
    their own username/password with the **Member** role (they can use
    everything except user management). Do this before exposing a public URL.
-4. **Leave "Auto Seat Upgrade" off** unless you want to experiment — it's an
+4. **Track your travel credits** — Credits page → Add Credit. Enter each
+   Southwest flight credit's confirmation number, amount, and expiration date
+   (find them in your cancellation emails or southwest.com → My Account →
+   Travel Funds). The app reminds you 30 days and 7 days before one expires.
+5. **Leave "Auto Seat Upgrade" off** unless you want to experiment — it's an
    experimental feature that automates Southwest's website and is unreliable
    (see the README's [Seat Upgrades](README.md#seat-upgrades-experimental)
    section).

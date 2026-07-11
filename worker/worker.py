@@ -37,6 +37,8 @@ from db import (
     cleanup_old_data,
     get_stale_capture_dirs,
     recover_stuck_checkins,
+    encrypt_legacy_passwords,
+    get_expiring_credits,
 )
 from lib.log import get_logger
 from lib.utils import (
@@ -1221,6 +1223,35 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
 
 
 
+def check_credit_expirations(conn: sqlite3.Connection) -> None:
+    """Notify when tracked Southwest travel credits approach expiration."""
+    try:
+        from notifications import send_notification
+
+        for days, flag in ((30, "notified_30d"), (7, "notified_7d")):
+            for credit in get_expiring_credits(conn, days, flag):
+                owner = credit.get("account_display_name") or credit.get("owner_name") or "someone"
+                title = f"Travel credit expiring in ≤{days} days"
+                message = (
+                    f"${credit['amount']:.2f} Southwest credit for {owner} "
+                    f"(confirmation {credit['confirmation_number']}) expires "
+                    f"{credit['expiration_date']}. Book with it before it's gone!"
+                )
+                try:
+                    send_notification(title, message)
+                except Exception as err:
+                    logger.error("Credit expiration notification failed: %s", err)
+                    continue
+                conn.execute(
+                    f"UPDATE travel_credits SET {flag} = 1 WHERE id = ?",
+                    (credit["id"],),
+                )
+                conn.commit()
+                add_log(conn, f"{title}: {message}", "warning")
+    except Exception as e:
+        logger.error("Credit expiration check failed: %s", e)
+
+
 def check_named_fare_watches(conn: sqlite3.Connection) -> None:
     """Run due multi-airline fare watches (Amadeus-based, browser-free)."""
     try:
@@ -1369,6 +1400,15 @@ def main_loop() -> None:
     if recovered:
         add_log(conn, f"Recovered {recovered} flight(s) stuck in checking_in after restart", "warning")
 
+    # Encrypt any Southwest passwords still stored as plaintext (one-time
+    # migration; new saves are encrypted by the frontend).
+    try:
+        migrated = encrypt_legacy_passwords(conn)
+        if migrated:
+            add_log(conn, f"Encrypted {migrated} stored Southwest password(s) at rest", "info")
+    except Exception as e:
+        logger.error("Password encryption migration failed: %s", e)
+
     # Start persistent browser session
     browser_session = BrowserSession()
     try:
@@ -1402,6 +1442,9 @@ def main_loop() -> None:
 
             # Check named multi-airline fare watches (no browser needed)
             check_named_fare_watches(conn)
+
+            # Notify about travel credits nearing expiration
+            check_credit_expirations(conn)
 
             # Attempt seat upgrades for A-List accounts (48h before departure)
             attempt_seat_upgrades(conn)

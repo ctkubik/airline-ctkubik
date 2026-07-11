@@ -49,13 +49,46 @@ async function verifyToken(token: string): Promise<boolean> {
   }
 }
 
+function withSecurityHeaders(response: NextResponse, request: NextRequest): NextResponse {
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("Referrer-Policy", "same-origin");
+  response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (request.headers.get("x-forwarded-proto") === "https") {
+    response.headers.set("Strict-Transport-Security", "max-age=15552000");
+  }
+  return response;
+}
+
+// CSRF defense-in-depth (cookies are already SameSite=Lax): reject mutating
+// requests whose Origin doesn't match the host they arrived on.
+function crossOriginWrite(request: NextRequest): boolean {
+  const method = request.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+  const origin = request.headers.get("origin");
+  if (!origin) return false; // same-origin fetches and non-browser clients
+  try {
+    const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || "";
+    return new URL(origin).host !== host;
+  } catch {
+    return true;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (crossOriginWrite(request)) {
+    return withSecurityHeaders(
+      NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 }),
+      request
+    );
+  }
 
   // Allow login page and auth API without authentication.
   // /api/health is exempt so Docker healthchecks work without a cookie.
   if (pathname === "/login" || pathname === "/api/auth" || pathname === "/api/health") {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next(), request);
   }
 
   // Allow static assets
@@ -67,12 +100,15 @@ export async function middleware(request: NextRequest) {
 
   if (!token || !(await verifyToken(token))) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return withSecurityHeaders(
+        NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+        request
+      );
     }
-    return NextResponse.redirect(new URL("/login", request.url));
+    return withSecurityHeaders(NextResponse.redirect(new URL("/login", request.url)), request);
   }
 
-  return NextResponse.next();
+  return withSecurityHeaders(NextResponse.next(), request);
 }
 
 export const config = {

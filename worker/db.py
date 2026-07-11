@@ -167,6 +167,21 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             details_json TEXT,
             checked_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS travel_credits (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+            owner_name TEXT DEFAULT '',
+            confirmation_number TEXT NOT NULL,
+            amount REAL NOT NULL,
+            currency TEXT DEFAULT 'USD',
+            expiration_date TEXT,
+            notes TEXT DEFAULT '',
+            is_used INTEGER DEFAULT 0,
+            notified_30d INTEGER DEFAULT 0,
+            notified_7d INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
         """
     )
 
@@ -220,7 +235,48 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def get_active_accounts(conn: sqlite3.Connection) -> list[dict]:
+    from lib.secrets import decrypt_secret
+
     rows = conn.execute("SELECT * FROM accounts WHERE is_active = 1").fetchall()
+    accounts = []
+    for r in rows:
+        account = dict(r)
+        account["password"] = decrypt_secret(account["password"])
+        accounts.append(account)
+    return accounts
+
+
+def encrypt_legacy_passwords(conn: sqlite3.Connection) -> int:
+    """One-time migration: encrypt any plaintext Southwest passwords at rest."""
+    from lib.secrets import encrypt_secret, is_encrypted, _get_key
+
+    if _get_key() is None:
+        return 0  # no AUTH_SECRET (dev) — leave as-is
+    rows = conn.execute("SELECT id, password FROM accounts").fetchall()
+    migrated = 0
+    for row in rows:
+        if not is_encrypted(row["password"]):
+            conn.execute(
+                "UPDATE accounts SET password = ? WHERE id = ?",
+                (encrypt_secret(row["password"]), row["id"]),
+            )
+            migrated += 1
+    if migrated:
+        conn.commit()
+    return migrated
+
+
+def get_expiring_credits(conn: sqlite3.Connection, within_days: int, flag_column: str) -> list[dict]:
+    """Active, unused credits expiring within N days that haven't been notified yet."""
+    rows = conn.execute(
+        f"SELECT tc.*, a.display_name AS account_display_name FROM travel_credits tc "
+        f"LEFT JOIN accounts a ON a.id = tc.account_id "
+        f"WHERE tc.is_used = 0 AND tc.{flag_column} = 0 "
+        f"AND tc.expiration_date IS NOT NULL "
+        f"AND date(tc.expiration_date) >= date('now') "
+        f"AND date(tc.expiration_date) <= date('now', ?)",
+        (f"+{int(within_days)} days",),
+    ).fetchall()
     return [dict(r) for r in rows]
 
 

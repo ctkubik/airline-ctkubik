@@ -191,6 +191,22 @@ function initTables(db: Database.Database) {
       details_json TEXT,
       checked_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS travel_credits (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      owner_name TEXT DEFAULT '',
+      confirmation_number TEXT NOT NULL,
+      amount REAL NOT NULL,
+      currency TEXT DEFAULT 'USD',
+      expiration_date TEXT,
+      notes TEXT DEFAULT '',
+      is_used INTEGER DEFAULT 0,
+      notified_30d INTEGER DEFAULT 0,
+      notified_7d INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 }
 

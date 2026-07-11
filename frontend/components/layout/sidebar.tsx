@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Plane, LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Activity, Menu, X, Search, UserCog } from "lucide-react";
+import { Plane, LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Activity, Menu, X, Search, UserCog, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -12,6 +12,7 @@ const navItems = [
   { href: "/reservations", label: "Reservations", icon: CalendarCheck },
   { href: "/flights", label: "Flights", icon: Plane },
   { href: "/fare-watches", label: "Fare Watches", icon: Search },
+  { href: "/credits", label: "Credits", icon: Wallet },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/users", label: "Users", icon: UserCog },
   { href: "/settings", label: "Settings", icon: Settings },

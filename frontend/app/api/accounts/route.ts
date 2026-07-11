@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { encryptSecret } from "@/lib/secrets";
 
 // Never SELECT a.* here: the password column holds the user's real Southwest
 // password (the worker needs it to log in) and must not be sent to the client.
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
   const id = crypto.randomUUID();
   db.prepare(
     "INSERT INTO accounts (id, display_name, username, password, is_alist, auto_upgrade_seats) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, display_name || "", username, password, is_alist ? 1 : 0, auto_upgrade_seats ? 1 : 0);
+  ).run(id, display_name || "", username, encryptSecret(password), is_alist ? 1 : 0, auto_upgrade_seats ? 1 : 0);
   const account = db
     .prepare(`SELECT ${ACCOUNT_COLUMNS} FROM accounts a WHERE a.id = ?`)
     .get(id);

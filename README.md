@@ -20,7 +20,9 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - [Web App Usage](#web-app-usage)
     * [Users](#users-users)
     * [Fare Watches](#fare-watches-fare-watches)
+    * [Travel Credits](#travel-credits-credits)
     * [Seat Upgrades (experimental)](#seat-upgrades-experimental)
+- [Security](#security)
 - [CLI Usage](#cli-usage)
 - [Configuration](#configuration)
     * [Environment Variables](#environment-variables)
@@ -59,9 +61,15 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Date windows**: Watch a whole departure/return window, not just one date
 - **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
 
-### Multi-User Login
+### Travel Credits
+- **Credits by person**: Track every Southwest flight credit — confirmation number, amount, expiration date
+- **Totals at a glance**: Available credit and how much is expiring within 60 days
+- **Expiration alerts**: Notifications 30 days and 7 days before a credit expires
+- **Mark used**: Keep the history without counting spent credits
+
+### Multi-User Login & Security
 - **User accounts**: Admins create accounts for family members (member or admin role)
-- **Safe for a public URL**: bcrypt-hashed passwords, signed HttpOnly session cookies, no default credentials
+- **Hardened for a public URL**: bcrypt-hashed passwords, signed HttpOnly session cookies, no default credentials, login rate limiting, CSRF origin checks, security headers, and Southwest passwords encrypted at rest (AES-256-GCM) — see [Security](#security)
 
 ### Fare Monitoring
 - **Automatic Fare Checks**: Checks for fare drops every 4 hours using fresh session tokens
@@ -297,8 +305,40 @@ Named multi-airline fare tracking for trips you're planning:
 
 Notes: the free Amadeus tier starts in a **test environment** with limited/cached data — good enough to try it; request (free) production keys in their dashboard for real coverage. Amadeus covers most airlines but **not Southwest**; Southwest fares are tracked natively on the Flights page.
 
+### Travel Credits (`/credits`)
+Track Southwest flight credits so they never expire unused:
+
+- **Add a credit** with its confirmation number, dollar amount, and expiration date; attach it to a monitored account ("Mom") or just type a name ("Uncle Dan")
+- **Summary cards** show total available credit and how much expires within 60 days
+- **Color-coded expiration**: red under 30 days, yellow under 90, plus *used* and *expired* states
+- **Alerts**: the worker sends a notification 30 days and 7 days before each credit expires (same Telegram/SMS/etc. services as everything else); editing the expiration date re-arms the alerts
+- **Mark used** when you spend a credit — it stays in the list for reference without counting toward totals
+
+> Credits are entered manually (from your cancellation email or southwest.com → My Account → Travel Funds). Heads up on Southwest's current policy: credits from Basic fares expire ~6 months from booking, others ~12 months.
+
 ### Seat Upgrades (experimental)
 The A-List auto seat-upgrade automates Southwest's desktop website in a real browser. Southwest changes that site frequently, so this feature is fragile: it may fail to find the seat map and can report a seat as selected without Southwest actually confirming it. Failures no longer interfere with check-ins (the browser is always restored, attempts are rate-limited, and check-ins take absolute priority), but treat any "seat selected" notification as unconfirmed until you verify in the Southwest app. The capture/audit system records every attempt (screenshots + DOM) under the flight's captures to help debug. Leave the per-account toggle off if you don't want it attempted at all.
+
+## Security
+
+Built-in protections, designed for running behind a public URL:
+
+| Layer | What's implemented |
+|-------|--------------------|
+| Passwords (app users) | bcrypt-hashed; minimum 8 characters; no default credentials — auth fails closed if unconfigured |
+| Sessions | HMAC-SHA256-signed HttpOnly cookies, SameSite=Lax, 7-day expiry, Secure flag on HTTPS |
+| Brute force | Login rate limiting per IP + username (8 attempts / 15 min, then lockout with Retry-After) |
+| CSRF | SameSite cookies plus an Origin check that rejects cross-site write requests |
+| Headers | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS on HTTPS |
+| Southwest credentials | Encrypted at rest with AES-256-GCM keyed from `AUTH_SECRET`; never returned by any API; decrypted only inside the worker |
+| Roles | Members use the app; only admins manage users; the last active admin can't be deleted or demoted |
+| Audit trail | Every login success, failure, and rate-limit event is logged with its IP in the Activity feed |
+
+Operational recommendations:
+- Set `AUTH_SECRET` and a strong `AUTH_PASSWORD` in `.env` (don't rely on the generated ones if the `data/` folder is shared or backed up somewhere less trusted)
+- **Rotating `AUTH_SECRET`** invalidates sessions *and* makes stored Southwest passwords undecryptable — re-enter them on the Accounts page after a rotation
+- Prefer Cloudflare Tunnel or Tailscale over opening router ports; for extra protection on a public URL, add [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) in front (free for small teams)
+- Keep the app updated: `git pull && docker compose up -d --build`
 
 ## CLI Usage
 
