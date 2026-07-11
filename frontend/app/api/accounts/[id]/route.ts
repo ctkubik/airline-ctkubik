@@ -35,7 +35,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   fields.push("updated_at = datetime('now')");
   values.push(params.id);
   db.prepare(`UPDATE accounts SET ${fields.join(", ")} WHERE id = ?`).run(...values);
-  const account = db.prepare("SELECT * FROM accounts WHERE id = ?").get(params.id);
+  // Exclude the password column: it holds the user's real Southwest password.
+  const account = db
+    .prepare(
+      "SELECT id, username, display_name, is_active, retrieval_interval, " +
+        "is_alist, auto_upgrade_seats, login_failure_count, created_at, updated_at " +
+        "FROM accounts WHERE id = ?"
+    )
+    .get(params.id);
   return NextResponse.json(account);
 }
 

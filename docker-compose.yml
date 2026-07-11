@@ -3,10 +3,16 @@ services:
     build: .
     container_name: southwest-checkin
     restart: unless-stopped
+    init: true
     ports:
       - "3000:3000"
     volumes:
       - ./data:/app/data
+    # Optional: copy .env.example to .env to choose your own credentials.
+    # Without one, the container generates credentials on first boot and
+    # prints them in the logs (docker compose logs app).
     env_file:
-      - .env
+      - path: .env
+        required: false
+    # Chromium needs a large shared-memory segment or it crashes tabs
     shm_size: "1gb"

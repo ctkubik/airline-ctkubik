@@ -422,7 +422,10 @@ class BrowserSession:
             self._display = Display(size=(1440, 1880), backend="xvfb")
             self._display.start()
         except Exception as e:
-            logger.debug("Failed to start display: %s", e)
+            # In Docker the browser runs headed and cannot start without the
+            # virtual display — surface this loudly instead of letting Chrome
+            # die later with an unrelated-looking error.
+            logger.error("Failed to start xvfb virtual display (is xvfb installed?): %s", e)
 
     def _click_login_button(self) -> None:
         if self._driver.is_element_visible("div[class^='errorMessage']"):

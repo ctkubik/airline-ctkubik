@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
-function getSecret(): string {
-  return process.env.AUTH_SECRET || "change-me-in-production";
+// No production fallback: a well-known default secret would let anyone forge
+// a valid auth cookie. Must stay in sync with lib/auth.ts getSecret().
+function getSecret(): string | null {
+  if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
+  if (process.env.NODE_ENV !== "production") return "dev-secret-do-not-use";
+  return null;
 }
 
 async function verifyToken(token: string): Promise<boolean> {
+  const secret = getSecret();
+  if (!secret) return false;
+
   const parts = token.split(".");
   if (parts.length !== 2) return false;
   const [payload, hmac] = parts;
@@ -16,7 +23,7 @@ async function verifyToken(token: string): Promise<boolean> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(getSecret()),
+    encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -38,8 +45,9 @@ async function verifyToken(token: string): Promise<boolean> {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow login page and auth API without authentication
-  if (pathname === "/login" || pathname === "/api/auth") {
+  // Allow login page and auth API without authentication.
+  // /api/health is exempt so Docker healthchecks work without a cookie.
+  if (pathname === "/login" || pathname === "/api/auth" || pathname === "/api/health") {
     return NextResponse.next();
   }
 

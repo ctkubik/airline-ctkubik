@@ -10,8 +10,9 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - [Features](#features)
 - [Architecture](#architecture)
 - [Installation](#installation)
-    * [Option 1: Web App (Railway)](#option-1-web-app-railway)
-    * [Option 2: Web App (Docker - Self-hosted)](#option-2-web-app-docker---self-hosted)
+    * [Quick Start (Docker)](#quick-start-docker)
+    * [Remote Access](#remote-access)
+    * [Option 2: Web App (Railway)](#option-2-web-app-railway)
     * [Option 3: CLI Only](#option-3-cli-only)
 - [Web App Usage](#web-app-usage)
 - [CLI Usage](#cli-usage)
@@ -111,102 +112,56 @@ The web app runs as a single Docker container with two processes managed by supe
 
 ## Installation
 
-### Option 1: Web App (Railway)
+### Quick Start (Docker)
 
-The easiest way to deploy. Railway provides container hosting with persistent storage.
+Runs on any machine with [Docker](https://docs.docker.com/get-docker/) installed — an old laptop, a mini PC, or a Raspberry Pi. This is the recommended (and free) way to host the app.
 
-1. **Fork the repository**:
-   - Go to [github.com/ctkubik/auto-southwest-check-in](https://github.com/ctkubik/auto-southwest-check-in/tree/claude/flight-monitoring-app-Bm8hC)
-   - Click **Fork** to create your own copy
+```shell
+git clone -b claude/project-status-hosting-co1bbh https://github.com/ctkubik/auto-southwest-check-in.git
+cd auto-southwest-check-in
+docker compose up -d --build
+```
 
-2. **Create a Railway project**:
-   - Go to [railway.app](https://railway.app) and sign up/log in
-   - Click **New Project** > **Deploy from GitHub repo**
-   - Select your forked repository
-   - Set the branch to `claude/flight-monitoring-app-Bm8hC`
-   - Railway will auto-detect the `Dockerfile` and start building
+> The `-b` flag is needed while the web app lives on a feature branch. Once it's merged into the repo's default branch, a plain `git clone` works.
 
-3. **Add a persistent volume** (required for data persistence across deploys):
-   - Open the **Command Palette** with `Cmd+K` (Mac) or `Ctrl+K` (Windows)
-   - Search for **"Volume"** and select **Create Volume**
-   - Set the **Mount Path** to `/app/data`
-   - Attach it to your service
+That's it. Open [http://localhost:3000](http://localhost:3000) and log in with the credentials shown in the container logs:
 
-   > **Note**: If you can't find Volumes in the UI, right-click the project canvas background to access the menu.
+```shell
+docker compose logs app | head -20
+```
 
-4. **Set environment variables** (in the Railway **Variables** tab):
+On first boot the app generates a random password and cookie secret and saves them in the `./data` volume, so they survive restarts. To choose your own credentials instead:
+
+```shell
+cp .env.example .env    # edit AUTH_USERNAME / AUTH_PASSWORD / AUTH_SECRET
+docker compose up -d --build
+```
+
+All application state (database, capture files, generated credentials) lives in `./data` — back up that folder and you can rebuild the container freely.
+
+### Remote Access
+
+The web UI listens on port 3000 on your machine. To reach it from your phone or another network, don't port-forward — use one of these free options:
+
+- **[Tailscale](https://tailscale.com)** (recommended): install it on the host machine and your phone/laptop. The dashboard becomes reachable at `http://<machine-name>:3000` from anywhere, with nothing exposed to the public internet.
+- **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)**: gives the app a public HTTPS URL on a domain you own while it keeps running at home.
+
+### Option 2: Web App (Railway)
+
+> **Note**: Railway no longer has a free tier (Hobby plan is ~$5/month). For free hosting, use the Docker quick start above on a machine at home.
+
+1. **Fork the repository** on GitHub
+2. **Create a Railway project**: **New Project** > **Deploy from GitHub repo**, select your fork — Railway auto-detects the `Dockerfile`
+3. **Add a persistent volume** with mount path `/app/data` (Command Palette: `Cmd+K` / `Ctrl+K` > "Create Volume")
+4. **Set environment variables** in the **Variables** tab:
    ```
    AUTH_USERNAME=your_username
    AUTH_PASSWORD=your_secure_password
    AUTH_SECRET=a_random_secret_string_at_least_20_chars
    ```
-
-5. **Generate a public domain**:
-   - Go to your service's **Settings** > **Networking**
-   - Click **Generate Domain**
-   - Your app will be available at `https://your-app.up.railway.app`
-
-6. **Access the web UI** at your Railway URL and log in with the credentials you set
+5. **Generate a public domain** under **Settings** > **Networking**, then log in at your Railway URL
 
 > **Tip**: If the volume isn't persisting data, add the environment variable `RAILWAY_RUN_UID=0` to your service.
-
-### Option 2: Web App (Docker - Self-hosted)
-
-Run the web app on any server or local machine with Docker installed.
-
-1. **Clone the repository**:
-   ```shell
-   git clone -b claude/flight-monitoring-app-Bm8hC https://github.com/ctkubik/auto-southwest-check-in.git
-   cd auto-southwest-check-in
-   ```
-
-2. **Build the Docker image**:
-   ```shell
-   docker build -t sw-checkin .
-   ```
-
-3. **Run the container**:
-   ```shell
-   docker run -d \
-     --name sw-checkin \
-     -p 3000:3000 \
-     -v sw-checkin-data:/app/data \
-     -e AUTH_USERNAME=admin \
-     -e AUTH_PASSWORD=your_secure_password \
-     -e AUTH_SECRET=your_random_secret \
-     --restart on-failure \
-     sw-checkin
-   ```
-
-4. **Access the web UI** at `http://localhost:3000`
-
-#### Docker Compose (Web App)
-
-Create a `docker-compose.yml`:
-
-```yaml
-services:
-  sw-checkin:
-    build: .
-    container_name: sw-checkin
-    restart: on-failure
-    ports:
-      - "3000:3000"
-    volumes:
-      - sw-checkin-data:/app/data
-    environment:
-      - AUTH_USERNAME=admin
-      - AUTH_PASSWORD=your_secure_password
-      - AUTH_SECRET=your_random_secret
-
-volumes:
-  sw-checkin-data:
-```
-
-Then run:
-```shell
-docker compose up -d
-```
 
 ### Option 3: CLI Only
 
@@ -219,7 +174,7 @@ Use the original command-line interface without the web dashboard.
 
 #### Setup
 ```shell
-git clone -b claude/flight-monitoring-app-Bm8hC https://github.com/ctkubik/auto-southwest-check-in.git
+git clone https://github.com/ctkubik/auto-southwest-check-in.git
 cd auto-southwest-check-in
 pip3 install -r requirements.txt
 ```
@@ -320,12 +275,12 @@ python3 southwest.py --help
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `AUTH_USERNAME` | Web UI login username | `admin` |
-| `AUTH_PASSWORD` | Web UI login password | `admin` |
-| `AUTH_SECRET` | Secret key for signing auth tokens (use 20+ random chars) | `change-me-in-production` |
+| `AUTH_PASSWORD` | Web UI login password | auto-generated on first boot (see container logs) |
+| `AUTH_SECRET` | Secret key for signing auth cookies (use 20+ random chars) | auto-generated on first boot |
 | `DB_PATH` | Path to SQLite database file | `/app/data/checkin.db` |
 | `RAILWAY_RUN_UID` | Set to `0` if Railway volume has permission issues | (unset) |
 
-**Important**: Change the default `AUTH_USERNAME`, `AUTH_PASSWORD`, and `AUTH_SECRET` before deploying to production.
+There are no insecure default credentials: if `AUTH_PASSWORD`/`AUTH_SECRET` are unset, the Docker entrypoint generates random values, persists them in the data volume, and prints the login password in the container logs. Outside Docker (e.g. Railway), you must set them yourself — the app refuses logins until they are set.
 
 ### Seat Preferences
 

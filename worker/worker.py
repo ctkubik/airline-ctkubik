@@ -2,6 +2,7 @@
 and manages check-in scheduling."""
 
 import json
+import logging
 import os
 import sys
 import signal
@@ -35,6 +36,7 @@ from db import (
     get_notification_configs,
     cleanup_old_data,
     get_stale_capture_dirs,
+    recover_stuck_checkins,
 )
 from lib.log import get_logger
 from lib.utils import (
@@ -67,6 +69,18 @@ shutdown_event = threading.Event()
 def get_db():
     """Create a new DB connection (for use in threads)."""
     return get_connection()
+
+
+def normalize_flight_number(number: str) -> str:
+    """Normalize a flight number for comparison across Southwest's formats.
+
+    The DB stores the first leg's raw number (e.g. "WN1234" or "1234") while
+    the change/shopping pages use the multi-leg format with 'WN' stripped and
+    legs joined by a slash wrapped in zero-width spaces (e.g. "123​/​456").
+    Comparing raw values silently never matches for connecting flights.
+    """
+    number = (number or "").replace("\u200b", "").replace("WN", "").lstrip("# ")
+    return number.split("/")[0].strip()
 
 
 def process_reservation(
@@ -118,6 +132,13 @@ def process_reservation(
         is_international = bound.get("isInternational", False)
 
         if departure_date and departure_time_str:
+            flight_obj = None
+            flight_obj_err = None
+            try:
+                flight_obj = Flight(bound, reservation_info, confirmation_number)
+            except Exception as err:
+                flight_obj_err = err
+
             # Extract airports - try multiple approaches
             dep_raw = bound.get("departureAirport", {})
             arr_raw = bound.get("arrivalAirport", {})
@@ -135,17 +156,13 @@ def process_reservation(
                 destination_airport = name if len(name) <= 4 else ""
 
             # Last resort: try Flight class (which uses "name" fields)
-            if not departure_airport or not destination_airport:
-                try:
-                    flight_obj = Flight(bound, reservation_info, confirmation_number)
-                    if not departure_airport:
-                        val = flight_obj.departure_airport
-                        departure_airport = val if len(val) <= 4 else ""
-                    if not destination_airport:
-                        val = flight_obj.destination_airport
-                        destination_airport = val if len(val) <= 4 else ""
-                except Exception:
-                    pass
+            if flight_obj and (not departure_airport or not destination_airport):
+                if not departure_airport:
+                    val = flight_obj.departure_airport
+                    departure_airport = val if len(val) <= 4 else ""
+                if not destination_airport:
+                    val = flight_obj.destination_airport
+                    destination_airport = val if len(val) <= 4 else ""
 
             # Log what we extracted for diagnostic purposes
             add_log(
@@ -155,13 +172,28 @@ def process_reservation(
                 "info",
             )
 
-            # Convert departure time to UTC
-            departure_utc = f"{departure_date}T{departure_time_str}:00"
-            try:
-                flight_obj = Flight(bound, reservation_info, confirmation_number)
-                departure_utc = flight_obj.departure_time.isoformat()
-            except Exception:
-                pass
+            # Convert departure time to UTC. Southwest reports airport-local
+            # times; scheduling a check-in requires the real UTC offset. If the
+            # timezone can't be resolved, storing local time as UTC would fire
+            # the check-in hours early and burn the one chance to check in — so
+            # skip the flight and surface the error instead.
+            if flight_obj is None:
+                msg = (
+                    f"Skipping flight {flight_number} ({departure_airport} -> "
+                    f"{destination_airport}): could not determine departure timezone: {flight_obj_err}"
+                )
+                logger.error(msg)
+                add_log(conn, msg, "error")
+                log_diagnostic(
+                    conn,
+                    category="flight_parse_failure",
+                    endpoint=f"reservation {confirmation_number}",
+                    expected_behavior="Flight() resolves airport timezone",
+                    actual_behavior=str(flight_obj_err),
+                    response_snapshot=json.dumps(bound)[:500],
+                )
+                continue
+            departure_utc = flight_obj.departure_time.isoformat()
 
             flight_id = upsert_flight(
                 conn,
@@ -242,8 +274,15 @@ def schedule_pending_flights(conn: sqlite3.Connection) -> None:
             is_same_day=False,
             db_conn_factory=get_db,
         )
-        handler.schedule_check_in()
+        # Register before scheduling so a failure can't leave a running thread
+        # unregistered (which would spawn a duplicate handler on the next poll).
         active_handlers[flight_id] = handler
+        try:
+            handler.schedule_check_in()
+        except Exception as e:
+            active_handlers.pop(flight_id, None)
+            logger.error("Failed to schedule check-in for flight %s: %s", flight_id, e)
+            continue
 
         logger.info(
             "Scheduled check-in for flight %s (%s -> %s) at %s",
@@ -451,7 +490,7 @@ def check_fares(conn: sqlite3.Connection) -> None:
             target_bound_page = None
             for idx, bound_sel in enumerate(bound_selections):
                 if idx < len(bound_keys) and idx < len(shopping_body):
-                    is_match = bound_sel.get("flight") == flight_row["flight_number"]
+                    is_match = normalize_flight_number(bound_sel.get("flight")) == normalize_flight_number(flight_row["flight_number"])
                     query[bound_keys[idx]] = {
                         "boundReference": shopping_body[idx].get("boundReference", ""),
                         "date": bound_sel.get("originalDate", ""),
@@ -509,7 +548,7 @@ def check_fares(conn: sqlite3.Connection) -> None:
                 card_nonstop = card.get("stopDescription", "") == "Nonstop"
                 card_stops = card.get("stopDescription", "")
                 card_depart_time = card.get("departureTime", "")
-                is_my_flight = card_flight_num == flight_row["flight_number"]
+                is_my_flight = normalize_flight_number(card_flight_num) == normalize_flight_number(flight_row["flight_number"])
 
                 # Apply filter based on mode
                 if fare_mode == "same_flight" and not is_my_flight:
@@ -618,6 +657,42 @@ def check_fares(conn: sqlite3.Connection) -> None:
 SEAT_UPGRADE_COOLDOWN = 3 * 3600  # 3 hours between successful attempts per flight
 
 
+def _restore_mobile_origin(conn: sqlite3.Connection, flight_id: str) -> None:
+    """Ensure the shared browser is back on mobile.southwest.com.
+
+    Seat upgrades navigate to the desktop site. All API calls run as fetch()
+    inside the current page, so leaving the browser on www.southwest.com makes
+    every subsequent mobile API request fail cross-origin with status 0.
+    """
+    if not browser_session:
+        return
+    try:
+        with browser_session._lock:
+            driver = browser_session._driver
+            if not driver:
+                return
+            try:
+                current = driver.current_url or ""
+            except Exception:
+                current = ""
+            if "mobile.southwest.com" in current:
+                return
+            driver.get("https://mobile.southwest.com/login?webView=true")
+            time.sleep(2)
+            browser_session._headers_set = False
+            try:
+                browser_session._wait_for_headers()
+            except Exception:
+                pass
+        add_log(conn, "Browser restored to mobile.southwest.com after seat upgrade", "info", flight_id)
+    except Exception as e:
+        logger.error("Failed to restore browser to mobile origin: %s", e)
+        try:
+            add_log(conn, f"Failed to restore browser to mobile site after seat upgrade: {e}", "error", flight_id)
+        except Exception:
+            pass
+
+
 def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None = None) -> None:
     """For A-List accounts, attempt seat upgrade from 48h to 2h before departure.
     If force_flight_id is provided, only check that specific flight (bypasses cooldown).
@@ -650,9 +725,6 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
         add_log(conn, f"Manual seat check triggered for flight {force_flight_id}", "info")
     else:
         flights = get_flights_for_seat_upgrade(conn)
-
-    if not flights:
-        return
 
     if not flights:
         return
@@ -694,6 +766,15 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                         continue
                 except Exception:
                     pass
+
+        # Record the attempt BEFORE doing anything: failed attempts must also
+        # respect the cooldown, otherwise a flight whose upgrade keeps failing
+        # is retried on every poll and monopolizes the shared browser for hours.
+        conn.execute(
+            "UPDATE flights SET last_seat_upgrade_attempt = ? WHERE id = ?",
+            (datetime.utcnow().isoformat(), flight_id),
+        )
+        conn.commit()
 
         add_log(conn, f"Attempting seat upgrade for {conf_num} ({route}). Current seat: {current_seat or 'none'}", "info", flight_id)
 
@@ -973,11 +1054,6 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                     f.write(dom)
                 add_log(conn, f"Seat map captured. URL: {driver.current_url}", "info", flight_id)
 
-                # Record cooldown
-                conn.execute("UPDATE flights SET last_seat_upgrade_attempt = ? WHERE id = ?",
-                             (datetime.utcnow().isoformat(), flight_id))
-                conn.commit()
-
                 # Record in captures table
                 manifest = json.dumps({
                     "flight_id": flight_id, "type": "seat_upgrade",
@@ -1135,13 +1211,23 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                 browser_session._driver.save_screenshot(f"/app/data/captures/{flight_id}/error.png")
             except Exception:
                 pass
+        finally:
+            # Every exit path (including the failure `continue`s above) must
+            # put the browser back on mobile.southwest.com. All API calls run
+            # as fetch() inside the page, so a browser left on the desktop
+            # site makes every subsequent request fail cross-origin with
+            # status 0 — including time-critical check-ins.
+            _restore_mobile_origin(conn, flight_id)
 
 
 
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
     """Check for manual seat check requests and execute them."""
+    # '_' is a single-character wildcard in LIKE — escape it so this matches
+    # only the literal __CHECK_SEATS_ marker, not arbitrary log messages.
     rows = conn.execute(
-        "SELECT id, message FROM worker_logs WHERE message LIKE '__CHECK_SEATS_%' ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, message FROM worker_logs WHERE message LIKE '\\_\\_CHECK\\_SEATS\\_%' ESCAPE '\\' "
+        "ORDER BY created_at DESC LIMIT 5"
     ).fetchall()
     for row in rows:
         conn.execute("DELETE FROM worker_logs WHERE id = ?", (row["id"],))
@@ -1244,15 +1330,17 @@ def run_daily_cleanup(conn: sqlite3.Connection) -> None:
 def cleanup_handlers() -> None:
     """Remove handlers for flights that are no longer pending."""
     conn = get_db()
-    for flight_id in list(active_handlers.keys()):
-        row = conn.execute(
-            "SELECT checkin_status FROM flights WHERE id = ?", (flight_id,)
-        ).fetchone()
-        if not row or row["checkin_status"] in ("success", "failed"):
-            handler = active_handlers.pop(flight_id, None)
-            if handler:
-                handler.stop_check_in()
-    conn.close()
+    try:
+        for flight_id in list(active_handlers.keys()):
+            row = conn.execute(
+                "SELECT checkin_status FROM flights WHERE id = ?", (flight_id,)
+            ).fetchone()
+            if not row or row["checkin_status"] in ("success", "failed"):
+                handler = active_handlers.pop(flight_id, None)
+                if handler:
+                    handler.stop_check_in()
+    finally:
+        conn.close()
 
 
 def main_loop() -> None:
@@ -1263,6 +1351,12 @@ def main_loop() -> None:
     conn = get_db()
     add_log(conn, "Worker started", "info")
 
+    # Recover flights stuck in 'checking_in' from a previous crash/restart —
+    # they would otherwise never be rescheduled.
+    recovered = recover_stuck_checkins(conn)
+    if recovered:
+        add_log(conn, f"Recovered {recovered} flight(s) stuck in checking_in after restart", "warning")
+
     # Start persistent browser session
     browser_session = BrowserSession()
     try:
@@ -1271,8 +1365,11 @@ def main_loop() -> None:
     except Exception as e:
         logger.error("Failed to start browser session: %s", e)
         add_log(conn, f"Failed to start browser session: {e}", "error")
+    finally:
+        conn.close()
 
     while not shutdown_event.is_set():
+        conn = None
         try:
             conn = get_db()
 
@@ -1305,8 +1402,6 @@ def main_loop() -> None:
 
             # Clean up completed handlers
             cleanup_handlers()
-
-            conn.close()
         except Exception as e:
             logger.exception("Error in main loop: %s", e)
             try:
@@ -1315,6 +1410,12 @@ def main_loop() -> None:
                 err_conn.close()
             except Exception:
                 pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         # Wait for next poll
         shutdown_event.wait(timeout=POLL_INTERVAL)
@@ -1333,6 +1434,14 @@ def signal_handler(signum, frame):
 
 
 if __name__ == "__main__":
+    # Route all module loggers (lib.*, __main__) to stderr so INFO-level
+    # diagnostics actually reach supervisord/docker logs. Without this only
+    # WARNING+ is visible, which makes missed check-ins impossible to debug.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     main_loop()

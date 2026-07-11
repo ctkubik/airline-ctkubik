@@ -3,19 +3,28 @@
 import json
 import os
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 
 DB_PATH = os.environ.get("DB_PATH", os.path.join("/app", "data", "checkin.db"))
 
+_schema_lock = threading.Lock()
+_schema_initialized = False
+
 
 def get_connection() -> sqlite3.Connection:
+    global _schema_initialized
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA foreign_keys=ON")
-    _init_tables(conn)
-    _migrate(conn)
+    with _schema_lock:
+        if not _schema_initialized:
+            _init_tables(conn)
+            _migrate(conn)
+            _schema_initialized = True
     return conn
 
 
@@ -186,6 +195,24 @@ def get_pending_flights(conn: sqlite3.Connection) -> list[dict]:
         (now,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def recover_stuck_checkins(conn: sqlite3.Connection) -> int:
+    """Reset future flights stuck in 'checking_in' back to 'pending'.
+
+    If the worker restarts (crash, deploy, container restart) while a check-in
+    thread is mid-flight, the row stays 'checking_in' forever and is never
+    rescheduled because get_pending_flights only selects pending/scheduled.
+    Called once at worker startup, when no handler threads can exist yet.
+    """
+    now = datetime.utcnow().isoformat()
+    cursor = conn.execute(
+        "UPDATE flights SET checkin_status = 'pending' "
+        "WHERE checkin_status = 'checking_in' AND departure_time > ?",
+        (now,),
+    )
+    conn.commit()
+    return cursor.rowcount
 
 
 def upsert_flight(
@@ -472,13 +499,24 @@ def cleanup_old_data(conn: sqlite3.Connection) -> dict[str, int]:
 
     conn.commit()
 
-    # VACUUM to reclaim disk space (deleted rows don't shrink the file otherwise)
+    # VACUUM to reclaim disk space (deleted rows don't shrink the file otherwise).
+    # VACUUM takes an exclusive lock on the whole database, which can block a
+    # time-critical check-in write — only run it when no check-in could be near.
     total = sum(counts.values())
     if total > 0:
-        try:
-            conn.execute("VACUUM")
-        except Exception:
-            pass  # VACUUM can fail if another connection holds a lock
+        now = datetime.utcnow().isoformat()
+        soon = (datetime.utcnow() + timedelta(hours=30)).isoformat()
+        upcoming = conn.execute(
+            "SELECT COUNT(*) FROM flights "
+            "WHERE checkin_status IN ('pending', 'scheduled', 'checking_in') "
+            "AND departure_time BETWEEN ? AND ?",
+            (now, soon),
+        ).fetchone()[0]
+        if upcoming == 0:
+            try:
+                conn.execute("VACUUM")
+            except Exception:
+                pass  # VACUUM can fail if another connection holds a lock
 
     return counts
 

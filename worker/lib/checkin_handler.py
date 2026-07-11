@@ -61,9 +61,12 @@ class CheckInHandler:
 
     def schedule_check_in(self) -> None:
         logger.debug("Scheduling check-in for flight %s", self.flight_db_id)
+        # Write the status before starting the thread: an immediate check-in
+        # (departure <24h away) writes 'checking_in' right away, and writing
+        # 'scheduled' afterwards would clobber it.
+        self._update_status("scheduled")
         self._thread = threading.Thread(target=self._set_check_in, daemon=True)
         self._thread.start()
-        self._update_status("scheduled")
 
     def stop_check_in(self) -> None:
         logger.debug("Stopping check-in for flight %s", self.flight_db_id)
@@ -105,15 +108,31 @@ class CheckInHandler:
     def _update_status(self, status: str, result: str | None = None) -> None:
         from db import update_flight_status, add_log
 
-        conn = self.db_conn_factory()
-        update_flight_status(conn, self.flight_db_id, status, result)
-        add_log(
-            conn,
-            f"Flight {self.confirmation_number} {self.departure_airport}->{self.destination_airport}: {status}",
-            level="info",
-            flight_id=self.flight_db_id,
-        )
-        conn.close()
+        # Retry on transient SQLite lock contention: if this write is lost the
+        # flight stays stuck in its previous status and is never re-attempted.
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                conn = self.db_conn_factory()
+                try:
+                    update_flight_status(conn, self.flight_db_id, status, result)
+                    add_log(
+                        conn,
+                        f"Flight {self.confirmation_number} {self.departure_airport}->{self.destination_airport}: {status}",
+                        level="info",
+                        flight_id=self.flight_db_id,
+                    )
+                    return
+                finally:
+                    conn.close()
+            except Exception as e:
+                last_err = e
+                logger.warning(
+                    "Failed to write status '%s' for flight %s (attempt %d): %s",
+                    status, self.flight_db_id, attempt + 1, e,
+                )
+                time.sleep(2)
+        raise last_err
 
     def _set_check_in(self) -> None:
         checkin_time = self.departure_time - timedelta(days=1)
@@ -123,7 +142,15 @@ class CheckInHandler:
                 self._check_in()
         except Exception as e:
             logger.exception("Error during check-in: %s", e)
-            self._update_status("failed", str(e))
+            try:
+                self._update_status("failed", str(e))
+            except Exception as status_err:
+                # Never let the status write kill the thread silently — the
+                # flight would be stuck 'scheduled'/'checking_in' forever.
+                logger.error(
+                    "Could not record failure for flight %s: %s",
+                    self.flight_db_id, status_err,
+                )
 
     def _wait_for_check_in(self, checkin_time: datetime) -> None:
         current_time = get_current_time()
