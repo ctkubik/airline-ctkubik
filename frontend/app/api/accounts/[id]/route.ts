@@ -1,0 +1,53 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getDb } from "@/lib/db";
+
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const body = await req.json();
+  const db = getDb();
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (body.display_name !== undefined) {
+    fields.push("display_name = ?");
+    values.push(body.display_name);
+  }
+  if (body.is_active !== undefined) {
+    fields.push("is_active = ?");
+    values.push(body.is_active ? 1 : 0);
+  }
+  if (body.retrieval_interval !== undefined) {
+    fields.push("retrieval_interval = ?");
+    values.push(body.retrieval_interval);
+  }
+  if (body.is_alist !== undefined) {
+    fields.push("is_alist = ?");
+    values.push(body.is_alist ? 1 : 0);
+  }
+  if (body.auto_upgrade_seats !== undefined) {
+    fields.push("auto_upgrade_seats = ?");
+    values.push(body.auto_upgrade_seats ? 1 : 0);
+  }
+
+  if (fields.length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
+  fields.push("updated_at = datetime('now')");
+  values.push(params.id);
+  db.prepare(`UPDATE accounts SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+  // Exclude the password column: it holds the user's real Southwest password.
+  const account = db
+    .prepare(
+      "SELECT id, username, display_name, is_active, retrieval_interval, " +
+        "is_alist, auto_upgrade_seats, login_failure_count, created_at, updated_at " +
+        "FROM accounts WHERE id = ?"
+    )
+    .get(params.id);
+  return NextResponse.json(account);
+}
+
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  const db = getDb();
+  db.prepare("DELETE FROM accounts WHERE id = ?").run(params.id);
+  return NextResponse.json({ ok: true });
+}

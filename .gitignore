@@ -7,9 +7,16 @@
 # Program files
 config.json
 .coverage
-logs/
+/logs/
 Pipfile
 venv/
 
 # From SeleniumBase
 downloaded_files/
+
+# Local secrets (docker compose)
+.env
+
+# Local data volume (SQLite DB + captures)
+/data/
+

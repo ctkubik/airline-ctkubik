@@ -21,3 +21,13 @@ logs/
 pyproject.toml
 tests/
 venv
+
+# Never bake local state, secrets, or host-built artifacts into the image:
+# host node_modules would overwrite the image's musl-compiled native modules.
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+frontend/node_modules
+frontend/.next

@@ -1,0 +1,34 @@
+services:
+  app:
+    build: .
+    container_name: southwest-checkin
+    restart: unless-stopped
+    init: true
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    # Optional: copy .env.example to .env to choose your own credentials.
+    # Without one, the container generates credentials on first boot and
+    # prints them in the logs (docker compose logs app).
+    env_file:
+      - path: .env
+        required: false
+    # Chromium needs a large shared-memory segment or it crashes tabs
+    shm_size: "1gb"
+
+  # Optional: public HTTPS URL via Cloudflare Tunnel (free).
+  # 1. Create a tunnel at https://one.dash.cloudflare.com (Networks > Tunnels),
+  #    pointing it at http://app:3000
+  # 2. Put the tunnel token in .env as CLOUDFLARE_TUNNEL_TOKEN=...
+  # 3. Start with:  docker compose --profile tunnel up -d
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: southwest-checkin-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
