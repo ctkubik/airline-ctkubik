@@ -2,11 +2,14 @@
 
 A web application that automatically checks you in to your Southwest Airlines flights. Features a full web dashboard for managing accounts, monitoring flights, tracking fare changes, recording original booking prices, and configuring seat preferences. Includes a comprehensive check-in data capture system for learning Southwest's assigned seating API. Built on top of [jdholtz/auto-southwest-check-in](https://github.com/jdholtz/auto-southwest-check-in) with a complete web frontend and enhanced worker process.
 
-**Repository**: [github.com/ctkubik/auto-southwest-check-in](https://github.com/ctkubik/auto-southwest-check-in/tree/claude/flight-monitoring-app-Bm8hC)
+**Repository**: [github.com/ctkubik/auto-southwest-check-in](https://github.com/ctkubik/auto-southwest-check-in)
+
+> **New to Docker?** Follow the **[Step-by-Step Setup Guide](SETUP.md)** — it covers installing Docker, starting the app, notifications, fare-watch API keys, and getting a public URL with Cloudflare Tunnel, assuming no prior experience.
 
 **Note**: If you are checking into an international flight, make sure to fill out all the passport information beforehand.
 
 ## Table of Contents
+- [Step-by-Step Setup Guide](SETUP.md) *(start here if you're new to Docker)*
 - [Features](#features)
 - [Architecture](#architecture)
 - [Installation](#installation)
@@ -15,6 +18,9 @@ A web application that automatically checks you in to your Southwest Airlines fl
     * [Option 2: Web App (Railway)](#option-2-web-app-railway)
     * [Option 3: CLI Only](#option-3-cli-only)
 - [Web App Usage](#web-app-usage)
+    * [Users](#users-users)
+    * [Fare Watches](#fare-watches-fare-watches)
+    * [Seat Upgrades (experimental)](#seat-upgrades-experimental)
 - [CLI Usage](#cli-usage)
 - [Configuration](#configuration)
     * [Environment Variables](#environment-variables)
@@ -113,7 +119,7 @@ The web app runs as a single Docker container with two processes managed by supe
 | Frontend | Next.js 14 (App Router) + Tailwind CSS |
 | API | Next.js API Routes (read/write SQLite via `better-sqlite3`) |
 | Database | SQLite (via `better-sqlite3` for Node, `sqlite3` for Python) |
-| Auth | HMAC-signed cookies (Edge-compatible middleware) |
+| Auth | Multi-user accounts (bcrypt) + HMAC-signed session cookies (Edge-compatible middleware) |
 | Worker | Python 3.13 with SeleniumBase + headless Chromium |
 | Browser Session | Persistent Chrome instance routing API calls via `fetch()` to bypass WAF |
 | Process Manager | supervisord (runs Next.js + Python worker) |
@@ -124,7 +130,7 @@ The web app runs as a single Docker container with two processes managed by supe
 
 ### Quick Start (Docker)
 
-Runs on any machine with [Docker](https://docs.docker.com/get-docker/) installed — an old laptop, a mini PC, or a Raspberry Pi. This is the recommended (and free) way to host the app.
+Runs on any machine with [Docker](https://docs.docker.com/get-docker/) installed — an old laptop, a mini PC, or a Raspberry Pi. This is the recommended (and free) way to host the app. If you've never used Docker, the **[Step-by-Step Setup Guide](SETUP.md)** walks through everything below in detail.
 
 ```shell
 git clone -b claude/project-status-hosting-co1bbh https://github.com/ctkubik/auto-southwest-check-in.git

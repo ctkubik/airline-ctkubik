@@ -1,4 +1,5 @@
 # Configuration
+> **Note**: This document describes `config.json`, which applies to the **CLI mode only** (`python3 southwest.py ...`). The **web app** (Docker) is configured through the dashboard UI and the `.env` file instead — see the [Step-by-Step Setup Guide](SETUP.md) and the [Environment Variables](README.md#environment-variables) table.
 This guide contains all the information you need to configure Auto-Southwest Check-In to your needs. A default/example configuration
 file can be found at [config.example.json](config.example.json)
 
