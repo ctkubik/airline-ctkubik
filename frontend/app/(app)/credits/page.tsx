@@ -13,11 +13,14 @@ interface Credit {
   account_display_name: string | null;
   account_username: string | null;
   owner_name: string;
+  owner_display_name: string | null;
+  owner_username: string | null;
   confirmation_number: string;
   amount: number;
   expiration_date: string | null;
   notes: string;
   is_used: number;
+  source: string;
 }
 
 interface Account {
@@ -31,6 +34,7 @@ export default function CreditsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [totalActive, setTotalActive] = useState(0);
   const [expiringSoon, setExpiringSoon] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -51,6 +55,7 @@ export default function CreditsPage() {
       setCredits(data.credits);
       setTotalActive(data.totalActive);
       setExpiringSoon(data.expiringSoon);
+      setIsAdmin(!!data.isAdmin);
     }
     if (aRes.ok) setAccounts(await aRes.json());
   }, []);
@@ -119,7 +124,9 @@ export default function CreditsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Travel Credits</h1>
           <p className="text-sm text-gray-500 mt-1">
             Southwest flight credits by person — confirmation number, amount, and expiration.
-            You&apos;ll get a notification 30 days and 7 days before a credit expires.
+            Credits on monitored accounts sync automatically (marked <b>synced</b>); you can also add
+            any credit manually. Notifications go out 30 and 7 days before a credit expires.
+            {isAdmin && " As admin you see everyone's credits; each member sees only their own."}
           </p>
         </div>
         <Button onClick={() => setShowForm((v) => !v)}>
@@ -241,15 +248,27 @@ export default function CreditsPage() {
                 </div>
                 <div className="font-semibold text-lg tabular-nums">${c.amount.toFixed(2)}</div>
                 {expiryBadge(c)}
+                {c.source === "southwest" ? (
+                  <Badge variant="scheduled">synced</Badge>
+                ) : (
+                  <Badge variant="default">manual</Badge>
+                )}
+                {isAdmin && (
+                  <span className="text-xs text-gray-400">
+                    owner: {c.owner_display_name || c.owner_username || "—"}
+                  </span>
+                )}
                 {c.notes && <span className="text-xs text-gray-500">{c.notes}</span>}
                 <div className="ml-auto flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => patchCredit(c.id, { is_used: !c.is_used })}>
                     <CheckCircle2 className="h-4 w-4 mr-1" />
                     {c.is_used ? "Mark unused" : "Mark used"}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => deleteCredit(c)}>
-                    <Trash2 className="h-4 w-4 text-red-500" />
-                  </Button>
+                  {c.source !== "southwest" && (
+                    <Button variant="outline" size="sm" onClick={() => deleteCredit(c)}>
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}

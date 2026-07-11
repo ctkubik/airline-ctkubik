@@ -38,6 +38,7 @@ function initTables(db: Database.Database) {
       auto_upgrade_seats INTEGER DEFAULT 0,
       display_name TEXT DEFAULT '',
       login_failure_count INTEGER DEFAULT 0,
+      owner_user_id TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -49,6 +50,7 @@ function initTables(db: Database.Database) {
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       is_active INTEGER DEFAULT 1,
+      owner_user_id TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -195,6 +197,7 @@ function initTables(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS travel_credits (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
       account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      owner_user_id TEXT,
       owner_name TEXT DEFAULT '',
       confirmation_number TEXT NOT NULL,
       amount REAL NOT NULL,
@@ -202,6 +205,8 @@ function initTables(db: Database.Database) {
       expiration_date TEXT,
       notes TEXT DEFAULT '',
       is_used INTEGER DEFAULT 0,
+      source TEXT DEFAULT 'manual',
+      external_id TEXT,
       notified_30d INTEGER DEFAULT 0,
       notified_7d INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
@@ -239,4 +244,10 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("fare_history", "my_flight_fare", "my_flight_fare INTEGER");
 
   addColumnIfMissing("seat_preferences", "fare_check_mode", "fare_check_mode TEXT DEFAULT 'same_day_nonstop'");
+
+  addColumnIfMissing("accounts", "owner_user_id", "owner_user_id TEXT");
+  addColumnIfMissing("reservations", "owner_user_id", "owner_user_id TEXT");
+  addColumnIfMissing("travel_credits", "owner_user_id", "owner_user_id TEXT");
+  addColumnIfMissing("travel_credits", "source", "source TEXT DEFAULT 'manual'");
+  addColumnIfMissing("travel_credits", "external_id", "external_id TEXT");
 }

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getAccessContext, ownerScope } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
 export function GET() {
+  const ctx = getAccessContext();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const db = getDb();
 
   // Ensure fare_history table exists with all columns
@@ -25,9 +28,11 @@ export function GET() {
   const now = new Date().toISOString();
 
   // Single query with LEFT JOINs to get latest and baseline fares (eliminates N+1)
+  const scope = ownerScope(ctx, "r.owner_user_id");
   const flights = db
     .prepare(
-      `SELECT f.*, r.confirmation_number, r.first_name, r.last_name,
+      `SELECT f.*, r.confirmation_number, r.first_name, r.last_name, r.owner_user_id,
+              u.display_name AS owner_display_name, u.username AS owner_username,
               lf.price_change AS lf_price_change, lf.currency_code AS lf_currency_code,
               lf.checked_at AS lf_checked_at, lf.best_flight_number AS lf_best_flight_number,
               lf.best_flight_nonstop AS lf_best_flight_nonstop, lf.best_flight_stops AS lf_best_flight_stops,
@@ -50,10 +55,11 @@ export function GET() {
          INNER JOIN (SELECT flight_id, MIN(checked_at) AS min_checked FROM fare_history GROUP BY flight_id) fh2
          ON fh1.flight_id = fh2.flight_id AND fh1.checked_at = fh2.min_checked
        ) bf ON bf.flight_id = f.id
-       WHERE f.departure_time > ?
+       LEFT JOIN users u ON u.id = r.owner_user_id
+       WHERE f.departure_time > ? AND ${scope.clause}
        ORDER BY f.departure_time ASC`
     )
-    .all(now);
+    .all(now, ...scope.params);
 
   const result = (flights as Record<string, unknown>[]).map((f) => {
     const latestFare = f.lf_price_change != null ? {

@@ -178,11 +178,16 @@ docker compose up -d
 3. **Create logins for your family** — Users page → Add User. Give each person
    their own username/password with the **Member** role (they can use
    everything except user management). Do this before exposing a public URL.
-4. **Track your travel credits** — Credits page → Add Credit. Enter each
-   Southwest flight credit's confirmation number, amount, and expiration date
-   (find them in your cancellation emails or southwest.com → My Account →
-   Travel Funds). The app reminds you 30 days and 7 days before one expires.
-5. **Leave "Auto Seat Upgrade" off** unless you want to experiment — it's an
+4. **Set up family logins and ownership** — Users page → add each family
+   member with the **Member** role. Then on the Accounts page (as admin) set
+   each Southwest account's **Owner** to the right person. From then on, each
+   member sees only their own accounts, flights, and credits when they log in,
+   while you (admin) see everyone's.
+5. **Travel credits** — the app auto-syncs flight credits from each monitored
+   account (shown as **synced** on the Credits page), and reminds you 30 and 7
+   days before any credit expires. You can also add credits manually for people
+   without a monitored account.
+6. **Leave "Auto Seat Upgrade" off** unless you want to experiment — it's an
    experimental feature that automates Southwest's website and is unreliable
    (see the README's [Seat Upgrades](README.md#seat-upgrades-experimental)
    section).

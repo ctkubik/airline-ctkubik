@@ -1,23 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getAccessContext, ownerScope } from "@/lib/access";
 
 export function GET() {
+  const ctx = getAccessContext();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const db = getDb();
 
+  const scope = ownerScope(ctx, "r.owner_user_id");
   // Single JOIN query instead of fetching all flights separately
   const rows = db
     .prepare(
       `SELECT r.*, a.username as account_username,
+              u.display_name as owner_display_name, u.username as owner_username,
               f.id as flight_id, f.flight_number, f.departure_airport,
               f.destination_airport, f.departure_time, f.is_international,
               f.checkin_status, f.checkin_result, f.checkin_attempted_at,
               f.assigned_seat, f.original_price, f.original_currency
        FROM reservations r
        LEFT JOIN accounts a ON a.id = r.account_id
+       LEFT JOIN users u ON u.id = r.owner_user_id
        LEFT JOIN flights f ON f.reservation_id = r.id
+       WHERE ${scope.clause}
        ORDER BY r.created_at DESC, f.departure_time ASC`
     )
-    .all() as Record<string, unknown>[];
+    .all(...scope.params) as Record<string, unknown>[];
 
   // Group flights under their reservation
   const flightKeys = [
@@ -58,18 +65,23 @@ export function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { confirmation_number, first_name, last_name } = await req.json();
+  const ctx = getAccessContext();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { confirmation_number, first_name, last_name, owner_user_id } = await req.json();
   if (!confirmation_number || !first_name || !last_name) {
     return NextResponse.json(
       { error: "Confirmation number, first name, and last name required" },
       { status: 400 }
     );
   }
+  // Members own what they add; admins may attribute a manual reservation to someone else.
+  const owner = ctx.isAdmin && owner_user_id ? owner_user_id : ctx.userId;
   const db = getDb();
   const id = crypto.randomUUID();
   db.prepare(
-    "INSERT INTO reservations (id, confirmation_number, first_name, last_name) VALUES (?, ?, ?, ?)"
-  ).run(id, confirmation_number.toUpperCase(), first_name, last_name);
+    "INSERT INTO reservations (id, confirmation_number, first_name, last_name, owner_user_id) VALUES (?, ?, ?, ?, ?)"
+  ).run(id, confirmation_number.toUpperCase(), first_name, last_name, owner);
   const reservation = db.prepare("SELECT * FROM reservations WHERE id = ?").get(id);
   return NextResponse.json(reservation, { status: 201 });
 }

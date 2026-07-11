@@ -37,6 +37,7 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             password TEXT NOT NULL,
             is_active INTEGER DEFAULT 1,
             retrieval_interval INTEGER DEFAULT 24,
+            owner_user_id TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -47,6 +48,7 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             first_name TEXT NOT NULL,
             last_name TEXT NOT NULL,
             is_active INTEGER DEFAULT 1,
+            owner_user_id TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -170,6 +172,7 @@ def _init_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS travel_credits (
             id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
             account_id TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+            owner_user_id TEXT,
             owner_name TEXT DEFAULT '',
             confirmation_number TEXT NOT NULL,
             amount REAL NOT NULL,
@@ -177,6 +180,8 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             expiration_date TEXT,
             notes TEXT DEFAULT '',
             is_used INTEGER DEFAULT 0,
+            source TEXT DEFAULT 'manual',
+            external_id TEXT,
             notified_30d INTEGER DEFAULT 0,
             notified_7d INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now')),
@@ -230,6 +235,23 @@ def _migrate(conn: sqlite3.Connection) -> None:
     sp_cols = [row[1] for row in conn.execute("PRAGMA table_info(seat_preferences)").fetchall()]
     if sp_cols and "fare_check_mode" not in sp_cols:
         conn.execute("ALTER TABLE seat_preferences ADD COLUMN fare_check_mode TEXT DEFAULT 'same_day_nonstop'")
+
+    # Ownership + credit-source migrations
+    if "owner_user_id" not in account_cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN owner_user_id TEXT")
+
+    res_cols = [row[1] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()]
+    if "owner_user_id" not in res_cols:
+        conn.execute("ALTER TABLE reservations ADD COLUMN owner_user_id TEXT")
+
+    tc_cols = [row[1] for row in conn.execute("PRAGMA table_info(travel_credits)").fetchall()]
+    if tc_cols:
+        if "owner_user_id" not in tc_cols:
+            conn.execute("ALTER TABLE travel_credits ADD COLUMN owner_user_id TEXT")
+        if "source" not in tc_cols:
+            conn.execute("ALTER TABLE travel_credits ADD COLUMN source TEXT DEFAULT 'manual'")
+        if "external_id" not in tc_cols:
+            conn.execute("ALTER TABLE travel_credits ADD COLUMN external_id TEXT")
 
     conn.commit()
 
@@ -557,6 +579,67 @@ def get_flights_for_seat_upgrade(conn: sqlite3.Connection) -> list[dict]:
         (hours_2, hours_48),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def set_reservation_owners_for_account(conn: sqlite3.Connection, account_id: str) -> None:
+    """Propagate an account's owner to its reservations (for member scoping)."""
+    conn.execute(
+        "UPDATE reservations SET owner_user_id = "
+        "(SELECT owner_user_id FROM accounts WHERE id = ?) WHERE account_id = ?",
+        (account_id, account_id),
+    )
+    conn.commit()
+
+
+def sync_travel_funds(conn: sqlite3.Connection, account_id: str, funds: list[dict]) -> int:
+    """Upsert auto-synced travel funds for an account. Returns count upserted.
+
+    Synced credits are keyed by (account_id, external_id) and marked
+    source='southwest'. Manual credits are never touched. The owner is
+    inherited from the account so the right family member sees them.
+    """
+    row = conn.execute("SELECT owner_user_id FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    owner_user_id = row["owner_user_id"] if row else None
+
+    upserted = 0
+    for fund in funds:
+        external_id = fund.get("external_id")
+        if not external_id:
+            continue
+        amount = fund.get("amount")
+        if amount is None:
+            continue
+        existing = conn.execute(
+            "SELECT id FROM travel_credits WHERE account_id = ? AND external_id = ? AND source = 'southwest'",
+            (account_id, external_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE travel_credits SET amount = ?, currency = ?, expiration_date = ?, "
+                "owner_user_id = ?, confirmation_number = ?, updated_at = datetime('now') "
+                "WHERE id = ?",
+                (
+                    amount, fund.get("currency", "USD"), fund.get("expiration_date"),
+                    owner_user_id, fund.get("confirmation_number", external_id[:8].upper()),
+                    existing["id"],
+                ),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO travel_credits "
+                "(account_id, owner_user_id, confirmation_number, amount, currency, "
+                " expiration_date, source, external_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'southwest', ?)",
+                (
+                    account_id, owner_user_id,
+                    fund.get("confirmation_number", external_id[:8].upper()),
+                    amount, fund.get("currency", "USD"), fund.get("expiration_date"),
+                    external_id,
+                ),
+            )
+        upserted += 1
+    conn.commit()
+    return upserted
 
 
 def get_notification_configs(conn: sqlite3.Connection) -> list[dict]:

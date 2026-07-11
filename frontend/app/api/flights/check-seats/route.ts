@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getAccessContext, canAccessFlight } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,9 @@ export async function POST(req: NextRequest) {
   if (!flight_id) {
     return NextResponse.json({ error: "flight_id required" }, { status: 400 });
   }
+  const ctx = getAccessContext();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!canAccessFlight(ctx, flight_id)) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const db = getDb();
   db.prepare(

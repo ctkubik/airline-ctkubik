@@ -33,12 +33,96 @@ TRIPS_URL = (
     "https://www.southwest.com/api/loyalty-management/v2/loyalty-management/"
     "accounts/self/future-air-reservations-secure"
 )
+# Southwest's logged-in travel funds page. Visiting it after login triggers the
+# XHR(s) that return the account's flight credits / travel funds; the exact API
+# path changes over time, so we capture any response whose URL looks fund-related
+# rather than hard-coding it.
+TRAVEL_FUNDS_PAGE_URL = "https://www.southwest.com/loyalty/myaccount/travel-funds"
+TRAVEL_FUNDS_URL_HINTS = ("travel-fund", "travelfund", "flight-credit", "flightcredit", "travel-credit")
 
 INVALID_CREDENTIALS_CODE = 400518024
 WAIT_TIMEOUT_SECS = 180
 SESSION_MAX_AGE = 2 * 60 * 60  # 2 hours before forced restart
 
 logger = get_logger(__name__)
+
+
+def _coerce_amount(value: Any) -> float | None:
+    """Extract a positive dollar amount from Southwest's varied shapes."""
+    if isinstance(value, dict):
+        # e.g. {"amount": "100.00", "currencyCode": "USD"}
+        for k in ("amount", "value", "total"):
+            if k in value:
+                return _coerce_amount(value[k])
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if value > 0 else None
+    if isinstance(value, str):
+        cleaned = value.replace("$", "").replace(",", "").strip()
+        try:
+            amt = float(cleaned)
+            return amt if amt > 0 else None
+        except ValueError:
+            return None
+    return None
+
+
+def _find_first(obj: dict, key_hints: tuple[str, ...]) -> Any:
+    for key, val in obj.items():
+        if any(h in key.lower() for h in key_hints) and val not in (None, "", {}):
+            return val
+    return None
+
+
+def extract_travel_funds(data: Any) -> list[dict]:
+    """Walk an arbitrary Southwest JSON response and pull out travel funds.
+
+    Defensive by design: Southwest's fund payloads change shape, so instead of
+    a fixed schema we collect any object that carries both a positive amount and
+    a fund/confirmation identifier. Returns a list of normalized dicts:
+    {external_id, confirmation_number, amount, currency, expiration_date}.
+    """
+    found: list[dict] = []
+
+    def visit(node: Any) -> None:
+        if isinstance(node, dict):
+            amount = None
+            for k, v in node.items():
+                kl = k.lower()
+                if ("amount" in kl or "balance" in kl or "remaining" in kl) and "code" not in kl:
+                    amount = _coerce_amount(v)
+                    if amount is not None:
+                        break
+            identifier = _find_first(
+                node,
+                ("fundid", "confirmationnumber", "recordlocator", "reference",
+                 "refundreference", "voucher", "creditnumber", "fundnumber"),
+            )
+            if amount is not None and identifier is not None and not isinstance(identifier, (dict, list)):
+                expiration = _find_first(node, ("expiration", "expire", "expiry"))
+                if isinstance(expiration, str):
+                    expiration = expiration[:10]  # ISO date prefix
+                else:
+                    expiration = None
+                currency = _find_first(node, ("currencycode", "currency")) or "USD"
+                if isinstance(currency, dict):
+                    currency = "USD"
+                found.append({
+                    "external_id": str(identifier),
+                    "confirmation_number": str(identifier)[:8].upper(),
+                    "amount": round(amount, 2),
+                    "currency": str(currency)[:3].upper(),
+                    "expiration_date": expiration,
+                })
+            for v in node.values():
+                visit(v)
+        elif isinstance(node, list):
+            for item in node:
+                visit(item)
+
+    visit(data)
+    return found
+
 
 FETCH_SCRIPT = """
 var callback = arguments[arguments.length - 1];
@@ -106,6 +190,7 @@ class BrowserSession:
         self._login_request_id = None
         self._login_status_code = None
         self._trips_request_id = None
+        self._travel_funds_request_ids: list[str] = []
 
     def start(self) -> None:
         """Start the browser and navigate to mobile site to establish WAF session."""
@@ -301,8 +386,11 @@ class BrowserSession:
 
         raise RequestError(error_msg, response_body)
 
-    def login_and_get_reservations(self, username: str, password: str) -> tuple[list[dict], str, str]:
-        """Log into a Southwest account and return (reservations, first_name, last_name).
+    def login_and_get_reservations(
+        self, username: str, password: str
+    ) -> tuple[list[dict], str, str, list[dict]]:
+        """Log into a Southwest account and return
+        (reservations, first_name, last_name, travel_funds).
 
         After login, navigates back to mobile site to maintain API session.
         """
@@ -316,6 +404,7 @@ class BrowserSession:
             self._login_request_id = None
             self._login_status_code = None
             self._trips_request_id = None
+            self._travel_funds_request_ids = []
 
             self._driver.add_cdp_listener("Network.responseReceived", self._login_listener)
 
@@ -361,6 +450,9 @@ class BrowserSession:
             trips_response = self._get_response_body(self._trips_request_id)
             reservations = trips_response.get("data", [])
 
+            # Best-effort: fetch travel funds / flight credits while authenticated.
+            travel_funds = self._fetch_travel_funds()
+
             # Navigate back to mobile site to re-establish API session
             logger.info("Navigating back to mobile site after login")
             self._headers_set = False
@@ -370,7 +462,41 @@ class BrowserSession:
             self._started_at = time.time()
             logger.info("Session re-established after login with %d headers", len(self.headers))
 
-            return reservations, first_name, last_name
+            return reservations, first_name, last_name, travel_funds
+
+    def _fetch_travel_funds(self) -> list[dict]:
+        """Navigate to the travel funds page and parse whatever fund API returns.
+
+        Best-effort and defensive: Southwest changes this area regularly, so we
+        trigger the page, capture any fund-related XHR, and parse flexibly.
+        Returns [] (never raises) so a failure here can't break account login.
+        """
+        try:
+            self._driver.get(TRAVEL_FUNDS_PAGE_URL)
+            # Give the SPA a moment to fire its fund XHR(s).
+            deadline = time.time() + 20
+            while time.time() < deadline and not self._travel_funds_request_ids:
+                time.sleep(0.5)
+
+            funds: list[dict] = []
+            for request_id in list(self._travel_funds_request_ids):
+                try:
+                    body = self._get_response_body(request_id)
+                except Exception:
+                    continue
+                funds.extend(extract_travel_funds(body))
+
+            # Deduplicate by external id (or confirmation+amount).
+            unique: dict[str, dict] = {}
+            for f in funds:
+                key = f.get("external_id") or f"{f.get('confirmation_number')}:{f.get('amount')}"
+                unique[key] = f
+            result = list(unique.values())
+            logger.info("Travel funds captured: %d", len(result))
+            return result
+        except Exception as e:
+            logger.warning("Travel funds fetch failed (non-fatal): %s", e)
+            return []
 
     def _headers_listener(self, data: JSON) -> None:
         request = data["params"]["request"]
@@ -380,11 +506,15 @@ class BrowserSession:
 
     def _login_listener(self, data: JSON) -> None:
         response = data["params"]["response"]
-        if response["url"] == SUCCESSFUL_LOGIN_URL:
+        url = response["url"]
+        if url == SUCCESSFUL_LOGIN_URL:
             self._login_request_id = data["params"]["requestId"]
             self._login_status_code = response["status"]
-        elif response["url"] == TRIPS_URL:
+        elif url == TRIPS_URL:
             self._trips_request_id = data["params"]["requestId"]
+        elif response.get("status") == 200 and any(h in url.lower() for h in TRAVEL_FUNDS_URL_HINTS):
+            # Capture any fund-related API response for parsing after login.
+            self._travel_funds_request_ids.append(data["params"]["requestId"])
 
     def _wait_for_headers(self) -> None:
         self._wait_for_attribute("_headers_set", timeout=WAIT_TIMEOUT_SECS)

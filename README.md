@@ -62,13 +62,15 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
 
 ### Travel Credits
-- **Credits by person**: Track every Southwest flight credit — confirmation number, amount, expiration date
+- **Auto-synced from Southwest**: Flight credits on monitored accounts are pulled in automatically on each account refresh (best-effort; manual entry always available)
+- **Credits by person**: Confirmation number, amount, expiration date — attached to an account or a free-text name
 - **Totals at a glance**: Available credit and how much is expiring within 60 days
 - **Expiration alerts**: Notifications 30 days and 7 days before a credit expires
 - **Mark used**: Keep the history without counting spent credits
 
-### Multi-User Login & Security
+### Multi-User Login, Roles & Security
 - **User accounts**: Admins create accounts for family members (member or admin role)
+- **Per-user visibility**: Members see only their own accounts, flights, reservations, and credits; **admins see everything for everyone**
 - **Hardened for a public URL**: bcrypt-hashed passwords, signed HttpOnly session cookies, no default credentials, login rate limiting, CSRF origin checks, security headers, and Southwest passwords encrypted at rest (AES-256-GCM) — see [Security](#security)
 
 ### Fare Monitoring
@@ -290,6 +292,13 @@ Configure preferences and notifications:
 
 ### Users (`/users`)
 Admin-only page to manage who can log in:
+
+**Roles & what each sees**
+- **Member**: sees and manages only their own Southwest accounts, flights, reservations, and travel credits. Cannot manage users or see the system activity feed.
+- **Admin**: sees and manages *everything for everyone* — all accounts, all flights, all credits — plus user management and the activity log.
+- **Assigning ownership**: on the Accounts page, an admin picks an **Owner** for each Southwest account. That account's reservations, flights, and synced credits then belong to that person. New accounts a member adds are owned by them automatically.
+
+Manage who can log in:
 - **Add users** with a username, password, display name (e.g. "Grandma"), and role
 - **Members** can use the whole dashboard except user management; **admins** can also manage users
 - **Reset passwords**, disable, or delete accounts
@@ -308,7 +317,9 @@ Notes: the free Amadeus tier starts in a **test environment** with limited/cache
 ### Travel Credits (`/credits`)
 Track Southwest flight credits so they never expire unused:
 
-- **Add a credit** with its confirmation number, dollar amount, and expiration date; attach it to a monitored account ("Mom") or just type a name ("Uncle Dan")
+- **Auto-sync**: whenever the worker logs into a monitored account, it also captures that account's travel funds / flight credits and adds them here, marked **synced**. Synced credits stay in step with Southwest and are read-only (you can still *mark used*). This is best-effort — Southwest changes their site often — so manual entry remains fully supported and reliable.
+- **Add a credit manually** with its confirmation number, dollar amount, and expiration date; attach it to a monitored account ("Mom") or just type a name ("Uncle Dan")
+- **Ownership**: a synced or account-linked credit belongs to whoever owns that account, so it shows up for the right family member. Members see only their own; admins see everyone's.
 - **Summary cards** show total available credit and how much expires within 60 days
 - **Color-coded expiration**: red under 30 days, yellow under 90, plus *used* and *expired* states
 - **Alerts**: the worker sends a notification 30 days and 7 days before each credit expires (same Telegram/SMS/etc. services as everything else); editing the expiration date re-arms the alerts
@@ -332,6 +343,7 @@ Built-in protections, designed for running behind a public URL:
 | Headers | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS on HTTPS |
 | Southwest credentials | Encrypted at rest with AES-256-GCM keyed from `AUTH_SECRET`; never returned by any API; decrypted only inside the worker |
 | Roles | Members use the app; only admins manage users; the last active admin can't be deleted or demoted |
+| Visibility | Every list and per-record API is scoped server-side by owner — a member cannot read or modify another user's accounts, flights, reservations, or credits even by direct id; admins see all |
 | Audit trail | Every login success, failure, and rate-limit event is logged with its IP in the Activity feed |
 
 Operational recommendations:

@@ -26,14 +26,30 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editNameValue, setEditNameValue] = useState("");
+  const [users, setUsers] = useState<{ id: string; username: string; display_name: string }[]>([]);
+  const isAdmin = users.length > 0; // /api/users returns 403 for members
 
   useEffect(() => {
     fetchAccounts();
+    // Only admins can list users; members get 403 and the owner control stays hidden.
+    fetch("/api/users")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setUsers)
+      .catch(() => setUsers([]));
   }, []);
 
   async function fetchAccounts() {
     const res = await fetch("/api/accounts");
     setAccounts(await res.json());
+  }
+
+  async function assignOwner(id: string, ownerUserId: string) {
+    await fetch(`/api/accounts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner_user_id: ownerUserId || null }),
+    });
+    fetchAccounts();
   }
 
   async function addAccount(e: React.FormEvent) {
@@ -267,6 +283,23 @@ export default function AccountsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {isAdmin && (
+                      <label className="flex items-center gap-1 text-xs text-gray-500">
+                        Owner:
+                        <select
+                          value={account.owner_user_id ?? ""}
+                          onChange={(e) => assignOwner(account.id, e.target.value)}
+                          className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs"
+                        >
+                          <option value="">Unassigned (admin only)</option>
+                          {users.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.display_name || u.username}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <span className="text-sm text-gray-500">
                       {account.reservation_count ?? 0} reservation
                       {(account.reservation_count ?? 0) !== 1 ? "s" : ""}

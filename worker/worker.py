@@ -39,6 +39,8 @@ from db import (
     recover_stuck_checkins,
     encrypt_legacy_passwords,
     get_expiring_credits,
+    set_reservation_owners_for_account,
+    sync_travel_funds,
 )
 from lib.log import get_logger
 from lib.utils import (
@@ -310,7 +312,7 @@ def process_accounts(conn: sqlite3.Connection) -> None:
         add_log(conn, f"Processing account: {account['username']}", "info")
 
         try:
-            sw_reservations, first_name, last_name = browser_session.login_and_get_reservations(
+            sw_reservations, first_name, last_name, travel_funds = browser_session.login_and_get_reservations(
                 account["username"], account["password"]
             )
         except DriverTimeoutError:
@@ -362,6 +364,20 @@ def process_accounts(conn: sqlite3.Connection) -> None:
             upsert_reservation(conn, account_id, conf_number, first_name or account["username"], last_name or "")
 
         deactivate_stale_reservations(conn, account_id, active_conf_numbers)
+
+        # Attribute this account's reservations to its owner (member scoping)
+        set_reservation_owners_for_account(conn, account_id)
+
+        # Auto-sync travel funds / flight credits captured during login
+        if travel_funds:
+            try:
+                n = sync_travel_funds(conn, account_id, travel_funds)
+                add_log(conn, f"Synced {n} travel credit(s) from {account['username']}", "info")
+            except Exception as e:
+                logger.error("Failed to sync travel funds for %s: %s", account["username"], e)
+                add_log(conn, f"Failed to sync travel funds for {account['username']}: {e}", "warning")
+        else:
+            logger.info("No travel funds captured for %s (none, or page changed)", account["username"])
 
         # Fetch flight details for each reservation via browser session
         reservations = conn.execute(
