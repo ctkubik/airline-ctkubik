@@ -97,23 +97,17 @@ Two ways — use whichever you're comfortable with.
 **Option A: with git** (installed by default on Mac/Linux; on Windows, get it
 from [git-scm.com](https://git-scm.com/download/win)):
 ```shell
-git clone -b claude/project-status-hosting-co1bbh https://github.com/ctkubik/auto-southwest-check-in.git
-cd auto-southwest-check-in
+git clone https://github.com/ctkubik/airline-ctkubik.git
+cd airline-ctkubik
 ```
-> The `-b ...` part selects the branch that contains the web app. If that
-> branch has since been made the repository default, a plain
-> `git clone https://github.com/ctkubik/auto-southwest-check-in.git` works.
 
 **Option B: without git** (Download ZIP):
-1. Go to the repository on GitHub
-2. Use the **branch dropdown** (top-left, above the file list) to select
-   `claude/project-status-hosting-co1bbh` — this matters; the default branch
-   may not contain the web app
-3. Click the green **Code** button → **Download ZIP**
-4. Unzip it somewhere permanent (e.g. `Documents/auto-southwest-check-in`)
-5. In your terminal, `cd` into that folder, e.g.:
+1. Go to [github.com/ctkubik/airline-ctkubik](https://github.com/ctkubik/airline-ctkubik)
+2. Click the green **Code** button → **Download ZIP**
+3. Unzip it somewhere permanent (e.g. `Documents/airline-ctkubik`)
+4. In your terminal, `cd` into that folder, e.g.:
    ```shell
-   cd ~/Documents/auto-southwest-check-in
+   cd ~/Documents/airline-ctkubik
    ```
 
 Everything in the rest of this guide is run **from inside this folder**.

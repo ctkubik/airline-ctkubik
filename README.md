@@ -2,7 +2,7 @@
 
 A web application that automatically checks you in to your Southwest Airlines flights. Features a full web dashboard for managing accounts, monitoring flights, tracking fare changes, recording original booking prices, and configuring seat preferences. Includes a comprehensive check-in data capture system for learning Southwest's assigned seating API. Built on top of [jdholtz/auto-southwest-check-in](https://github.com/jdholtz/auto-southwest-check-in) with a complete web frontend and enhanced worker process.
 
-**Repository**: [github.com/ctkubik/auto-southwest-check-in](https://github.com/ctkubik/auto-southwest-check-in)
+**Repository**: [github.com/ctkubik/airline-ctkubik](https://github.com/ctkubik/airline-ctkubik)
 
 > **New to Docker?** Follow the **[Step-by-Step Setup Guide](SETUP.md)** — it covers installing Docker, starting the app, notifications, fare-watch API keys, and getting a public URL with Cloudflare Tunnel, assuming no prior experience.
 
@@ -133,12 +133,10 @@ The web app runs as a single Docker container with two processes managed by supe
 Runs on any machine with [Docker](https://docs.docker.com/get-docker/) installed — an old laptop, a mini PC, or a Raspberry Pi. This is the recommended (and free) way to host the app. If you've never used Docker, the **[Step-by-Step Setup Guide](SETUP.md)** walks through everything below in detail.
 
 ```shell
-git clone -b claude/project-status-hosting-co1bbh https://github.com/ctkubik/auto-southwest-check-in.git
-cd auto-southwest-check-in
+git clone https://github.com/ctkubik/airline-ctkubik.git
+cd airline-ctkubik
 docker compose up -d --build
 ```
-
-> The `-b` flag is needed while the web app lives on a feature branch. Once it's merged into the repo's default branch, a plain `git clone` works.
 
 That's it. Open [http://localhost:3000](http://localhost:3000) and log in with the credentials shown in the container logs:
 
@@ -195,8 +193,8 @@ Use the original command-line interface without the web dashboard.
 
 #### Setup
 ```shell
-git clone https://github.com/ctkubik/auto-southwest-check-in.git
-cd auto-southwest-check-in
+git clone https://github.com/ctkubik/airline-ctkubik.git
+cd airline-ctkubik
 pip3 install -r requirements.txt
 ```
 
@@ -522,7 +520,7 @@ If running Docker, try running with the `--privileged` flag. On Railway, this is
 [Any Chromium-based browser]: https://en.wikipedia.org/wiki/Chromium_(web_browser)#Browsers_based_on_Chromium
 [Python virtual environment]: https://virtualenv.pypa.io/en/stable/
 [Docker]: https://www.docker.com/
-[GitHub Issues]: https://github.com/ctkubik/auto-southwest-check-in/issues
-[GitHub Discussion]: https://github.com/ctkubik/auto-southwest-check-in/discussions
-[Pull Request]: https://github.com/ctkubik/auto-southwest-check-in/pulls
+[GitHub Issues]: https://github.com/ctkubik/airline-ctkubik/issues
+[GitHub Discussion]: https://github.com/ctkubik/airline-ctkubik/discussions
+[Pull Request]: https://github.com/ctkubik/airline-ctkubik/pulls
 [this Stack Overflow question]: https://stackoverflow.com/questions/42098126/mac-osx-python-ssl-sslerror-ssl-certificate-verify-failed-certificate-verify
