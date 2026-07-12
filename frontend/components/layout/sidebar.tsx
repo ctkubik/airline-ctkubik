@@ -17,6 +17,7 @@ import {
   UserCog,
   Wallet,
   FileText,
+  Map,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
@@ -35,6 +36,7 @@ const navSections: { heading: string; items: { href: string; label: string; icon
       { href: "/accounts", label: "Accounts", icon: Users },
       { href: "/reservations", label: "Reservations", icon: CalendarCheck },
       { href: "/flights", label: "Flights", icon: Plane },
+      { href: "/trips", label: "Trips", icon: Map },
     ],
   },
   {

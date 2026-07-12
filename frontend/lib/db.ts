@@ -89,6 +89,10 @@ function initTables(db: Database.Database) {
       airline TEXT,
       auto_checkin INTEGER DEFAULT 1,
       checkin_reminder_sent INTEGER DEFAULT 0,
+      trip_id TEXT,
+      aircraft TEXT,
+      arrival_status TEXT,
+      arrival_notified TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -250,6 +254,18 @@ function initTables(db: Database.Database) {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS trips (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      owner_user_id TEXT,
+      name TEXT NOT NULL,
+      destination TEXT DEFAULT '',
+      start_date TEXT,
+      end_date TEXT,
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -302,5 +318,9 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("flights", "airline", "airline TEXT");
   addColumnIfMissing("flights", "auto_checkin", "auto_checkin INTEGER DEFAULT 1");
   addColumnIfMissing("flights", "checkin_reminder_sent", "checkin_reminder_sent INTEGER DEFAULT 0");
+  addColumnIfMissing("flights", "trip_id", "trip_id TEXT");
+  addColumnIfMissing("flights", "aircraft", "aircraft TEXT");
+  addColumnIfMissing("flights", "arrival_status", "arrival_status TEXT");
+  addColumnIfMissing("flights", "arrival_notified", "arrival_notified TEXT");
   addColumnIfMissing("reservations", "is_southwest", "is_southwest INTEGER DEFAULT 1");
 }

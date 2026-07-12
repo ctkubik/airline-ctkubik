@@ -213,6 +213,17 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS trips (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            owner_user_id TEXT,
+            name TEXT NOT NULL,
+            destination TEXT DEFAULT '',
+            start_date TEXT,
+            end_date TEXT,
+            notes TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
         """
     )
 
@@ -245,6 +256,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE flights ADD COLUMN auto_checkin INTEGER DEFAULT 1")
     if "checkin_reminder_sent" not in flight_cols:
         conn.execute("ALTER TABLE flights ADD COLUMN checkin_reminder_sent INTEGER DEFAULT 0")
+    if "trip_id" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN trip_id TEXT")
+    if "aircraft" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN aircraft TEXT")
+    if "arrival_status" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN arrival_status TEXT")
+    if "arrival_notified" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN arrival_notified TEXT")
 
     res_cols2 = [row[1] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()]
     if "is_southwest" not in res_cols2:
