@@ -68,6 +68,11 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Expiration alerts**: Notifications 30 days and 7 days before a credit expires
 - **Mark used**: Keep the history without counting spent credits
 
+### Calendar Feed & Documents
+- **Calendar subscription**: a private per-user .ics URL puts your flights and check-in times in Apple/Google/Outlook Calendar, always in sync
+- **Per-user notifications**: each family member routes alerts to their own phone/Telegram; shared services still fire for everyone
+- **Document vault**: passports, Global Entry, TSA PreCheck, and loyalty numbers with reminders 30 and 7 days before expiry; numbers encrypted at rest
+
 ### Multi-User Login, Roles & Security
 - **User accounts**: Admins create accounts for family members (member or admin role)
 - **Per-user visibility**: Members see only their own accounts, flights, reservations, and credits; **admins see everything for everyone**

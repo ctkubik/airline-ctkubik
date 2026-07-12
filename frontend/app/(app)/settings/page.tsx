@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Trash2, Plus, Save, MessageSquare } from "lucide-react";
 import type { NotificationConfig } from "@/lib/types";
+import { CalendarFeed } from "@/components/settings/calendar-feed";
 
 const ALL_SEAT_LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -126,7 +127,13 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+      <div>
+        <div className="eyebrow mb-1">System</div>
+        <h1 className="text-[28px] font-semibold tracking-tight">Settings</h1>
+      </div>
+
+      {/* Calendar subscription */}
+      <CalendarFeed />
 
       {/* Seat Preferences */}
       <Card>

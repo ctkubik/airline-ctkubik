@@ -87,7 +87,12 @@ export async function middleware(request: NextRequest) {
 
   // Allow login page and auth API without authentication.
   // /api/health is exempt so Docker healthchecks work without a cookie.
-  if (pathname === "/login" || pathname === "/api/auth" || pathname === "/api/health") {
+  // The iCalendar feed (/api/calendar/<token>) is token-authenticated so
+  // calendar apps can subscribe without a cookie — but /api/calendar/token
+  // (managing your own token) still requires auth.
+  const isCalendarFeed =
+    pathname.startsWith("/api/calendar/") && pathname !== "/api/calendar/token";
+  if (pathname === "/login" || pathname === "/api/auth" || pathname === "/api/health" || isCalendarFeed) {
     return withSecurityHeaders(NextResponse.next(), request);
   }
 

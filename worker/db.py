@@ -84,7 +84,9 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             id TEXT PRIMARY KEY,
             service_url TEXT NOT NULL,
             notification_level INTEGER DEFAULT 1,
-            is_active INTEGER DEFAULT 1
+            is_active INTEGER DEFAULT 1,
+            user_id TEXT,
+            label TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS worker_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,6 +133,21 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             display_name TEXT DEFAULT '',
             role TEXT NOT NULL DEFAULT 'member',
             is_active INTEGER DEFAULT 1,
+            calendar_token TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            owner_user_id TEXT,
+            doc_type TEXT NOT NULL DEFAULT 'other',
+            label TEXT DEFAULT '',
+            holder_name TEXT DEFAULT '',
+            number_enc TEXT DEFAULT '',
+            expiration_date TEXT,
+            notes TEXT DEFAULT '',
+            notified_30d INTEGER DEFAULT 0,
+            notified_7d INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -253,6 +270,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if "external_id" not in tc_cols:
             conn.execute("ALTER TABLE travel_credits ADD COLUMN external_id TEXT")
 
+    user_cols = [row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+    if user_cols and "calendar_token" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN calendar_token TEXT")
+
+    nc_cols = [row[1] for row in conn.execute("PRAGMA table_info(notification_configs)").fetchall()]
+    if nc_cols:
+        if "user_id" not in nc_cols:
+            conn.execute("ALTER TABLE notification_configs ADD COLUMN user_id TEXT")
+        if "label" not in nc_cols:
+            conn.execute("ALTER TABLE notification_configs ADD COLUMN label TEXT DEFAULT ''")
+
     conn.commit()
 
 
@@ -286,6 +314,19 @@ def encrypt_legacy_passwords(conn: sqlite3.Connection) -> int:
     if migrated:
         conn.commit()
     return migrated
+
+
+def get_expiring_documents(conn: sqlite3.Connection, within_days: int, flag_column: str) -> list[dict]:
+    """Documents expiring within N days that haven't been alerted on this window."""
+    rows = conn.execute(
+        f"SELECT d.*, u.display_name AS owner_display_name FROM documents d "
+        f"LEFT JOIN users u ON u.id = d.owner_user_id "
+        f"WHERE d.{flag_column} = 0 AND d.expiration_date IS NOT NULL "
+        f"AND date(d.expiration_date) >= date('now') "
+        f"AND date(d.expiration_date) <= date('now', ?)",
+        (f"+{int(within_days)} days",),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_expiring_credits(conn: sqlite3.Connection, within_days: int, flag_column: str) -> list[dict]:
@@ -642,11 +683,39 @@ def sync_travel_funds(conn: sqlite3.Connection, account_id: str, funds: list[dic
     return upserted
 
 
-def get_notification_configs(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute(
-        "SELECT * FROM notification_configs WHERE is_active = 1"
-    ).fetchall()
+def get_notification_configs(conn: sqlite3.Connection, user_id: str | None = None) -> list[dict]:
+    """Active notification services.
+
+    With no user_id: every active service (used for broadcast/test messages).
+    With a user_id: that user's own services plus any global (user_id IS NULL)
+    services, so shared/household services still fire while each member can
+    also route alerts to their own phone.
+    """
+    if user_id is None:
+        rows = conn.execute("SELECT * FROM notification_configs WHERE is_active = 1").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM notification_configs WHERE is_active = 1 "
+            "AND (user_id = ? OR user_id IS NULL OR user_id = '')",
+            (user_id,),
+        ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_flight_owner(conn: sqlite3.Connection, flight_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT r.owner_user_id AS owner FROM flights f "
+        "JOIN reservations r ON r.id = f.reservation_id WHERE f.id = ?",
+        (flight_id,),
+    ).fetchone()
+    return row["owner"] if row else None
+
+
+def get_user_id_by_username(conn: sqlite3.Connection, username: str) -> str | None:
+    if not username:
+        return None
+    row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+    return row["id"] if row else None
 
 
 # ── Data Retention / Cleanup ────────────────────────────────────────────

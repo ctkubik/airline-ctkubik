@@ -78,7 +78,9 @@ function initTables(db: Database.Database) {
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
       service_url TEXT NOT NULL,
       notification_level INTEGER DEFAULT 1,
-      is_active INTEGER DEFAULT 1
+      is_active INTEGER DEFAULT 1,
+      user_id TEXT,
+      label TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS worker_logs (
@@ -153,6 +155,22 @@ function initTables(db: Database.Database) {
       display_name TEXT DEFAULT '',
       role TEXT NOT NULL DEFAULT 'member',
       is_active INTEGER DEFAULT 1,
+      calendar_token TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      owner_user_id TEXT,
+      doc_type TEXT NOT NULL DEFAULT 'other',
+      label TEXT DEFAULT '',
+      holder_name TEXT DEFAULT '',
+      number_enc TEXT DEFAULT '',
+      expiration_date TEXT,
+      notes TEXT DEFAULT '',
+      notified_30d INTEGER DEFAULT 0,
+      notified_7d INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -250,4 +268,7 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("travel_credits", "owner_user_id", "owner_user_id TEXT");
   addColumnIfMissing("travel_credits", "source", "source TEXT DEFAULT 'manual'");
   addColumnIfMissing("travel_credits", "external_id", "external_id TEXT");
+  addColumnIfMissing("users", "calendar_token", "calendar_token TEXT");
+  addColumnIfMissing("notification_configs", "user_id", "user_id TEXT");
+  addColumnIfMissing("notification_configs", "label", "label TEXT DEFAULT ''");
 }

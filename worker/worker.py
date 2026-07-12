@@ -39,9 +39,21 @@ from db import (
     recover_stuck_checkins,
     encrypt_legacy_passwords,
     get_expiring_credits,
+    get_expiring_documents,
     set_reservation_owners_for_account,
     sync_travel_funds,
 )
+
+DOC_TYPE_LABELS = {
+    "passport": "Passport",
+    "global_entry": "Global Entry",
+    "tsa_precheck": "TSA PreCheck",
+    "known_traveler": "Known Traveler",
+    "visa": "Visa",
+    "drivers_license": "Driver's license",
+    "loyalty": "Loyalty membership",
+    "other": "Travel document",
+}
 from lib.log import get_logger
 from lib.utils import (
     CheckFaresOption,
@@ -656,8 +668,10 @@ def check_fares(conn: sqlite3.Connection) -> None:
                     add_log(conn, f"NEW fare drop for {flight_row['confirmation_number']}: {price_str}{alt_info} (was {prev_amount})", "info", flight_row["id"])
                     try:
                         from notifications import notify_fare_drop
+                        from db import get_flight_owner
                         notify_msg = f"{price_str}{alt_info}"
-                        notify_fare_drop(flight_row["confirmation_number"], route, notify_msg)
+                        owner = get_flight_owner(conn, flight_row["id"])
+                        notify_fare_drop(flight_row["confirmation_number"], route, notify_msg, user_id=owner)
                     except Exception:
                         pass
                 else:
@@ -1202,7 +1216,12 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                             audit.end_step(success=True, data={"seat": best["seat"], "score": best["score"], "clicked": True, "confirmed": True})
                             try:
                                 from notifications import send_notification
-                                send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} selected for {route}")
+                                from db import get_flight_owner
+                                send_notification(
+                                    f"Seat Selected: {conf_num}",
+                                    f"Seat {best['seat']} selected for {route}",
+                                    user_id=get_flight_owner(conn, flight_id),
+                                )
                             except Exception:
                                 pass
                         else:
@@ -1254,7 +1273,7 @@ def check_credit_expirations(conn: sqlite3.Connection) -> None:
                     f"{credit['expiration_date']}. Book with it before it's gone!"
                 )
                 try:
-                    send_notification(title, message)
+                    send_notification(title, message, user_id=credit.get("owner_user_id"))
                 except Exception as err:
                     logger.error("Credit expiration notification failed: %s", err)
                     continue
@@ -1266,6 +1285,33 @@ def check_credit_expirations(conn: sqlite3.Connection) -> None:
                 add_log(conn, f"{title}: {message}", "warning")
     except Exception as e:
         logger.error("Credit expiration check failed: %s", e)
+
+
+def check_document_expirations(conn: sqlite3.Connection) -> None:
+    """Notify when travel documents (passports, PreCheck, etc.) near expiration."""
+    try:
+        from notifications import send_notification
+
+        for days, flag in ((30, "notified_30d"), (7, "notified_7d")):
+            for doc in get_expiring_documents(conn, days, flag):
+                who = doc.get("holder_name") or doc.get("owner_display_name") or "someone"
+                kind = DOC_TYPE_LABELS.get(doc.get("doc_type"), "Travel document")
+                label = doc.get("label") or kind
+                title = f"{kind} expiring in ≤{days} days"
+                message = (
+                    f"{label} for {who} expires {doc['expiration_date']}. "
+                    f"Renew it before your next trip."
+                )
+                try:
+                    send_notification(title, message, user_id=doc.get("owner_user_id"))
+                except Exception as err:
+                    logger.error("Document expiration notification failed: %s", err)
+                    continue
+                conn.execute(f"UPDATE documents SET {flag} = 1 WHERE id = ?", (doc["id"],))
+                conn.commit()
+                add_log(conn, f"{title}: {message}", "warning")
+    except Exception as e:
+        logger.error("Document expiration check failed: %s", e)
 
 
 def check_named_fare_watches(conn: sqlite3.Connection) -> None:
@@ -1300,19 +1346,32 @@ def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
 
 
 def process_test_notifications(conn: sqlite3.Connection) -> None:
-    """Check for test notification requests and send them."""
+    """Check for test notification requests and send them to the requester."""
+    # Match both the legacy global marker and per-user markers.
     rows = conn.execute(
-        "SELECT id FROM worker_logs WHERE message = '__TEST_NOTIFICATION__' ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, message FROM worker_logs "
+        "WHERE message = '__TEST_NOTIFICATION__' "
+        "OR (message LIKE '\\_\\_TEST\\_NOTIFICATION\\_%' ESCAPE '\\') "
+        "ORDER BY created_at DESC LIMIT 5"
     ).fetchall()
-    if rows:
-        # Delete the test markers
-        for row in rows:
-            conn.execute("DELETE FROM worker_logs WHERE id = ?", (row["id"],))
+    if not rows:
+        return
+    from notifications import send_notification
+
+    for row in rows:
+        conn.execute("DELETE FROM worker_logs WHERE id = ?", (row["id"],))
         conn.commit()
-        # Send the test notification
+        marker = row["message"]
+        # __TEST_NOTIFICATION_<user_id>__  → route to that user; legacy → global
+        user_id = None
+        if marker != "__TEST_NOTIFICATION__":
+            user_id = marker.replace("__TEST_NOTIFICATION_", "").rstrip("_") or None
         try:
-            from notifications import notify_test
-            notify_test()
+            send_notification(
+                "SW Check-In Test",
+                "This is a test notification from your Southwest travel dashboard.",
+                user_id=user_id,
+            )
             add_log(conn, "Test notification sent successfully", "info")
         except Exception as e:
             add_log(conn, f"Test notification failed: {e}", "error")
@@ -1461,6 +1520,9 @@ def main_loop() -> None:
 
             # Notify about travel credits nearing expiration
             check_credit_expirations(conn)
+
+            # Notify about travel documents (passports, PreCheck) nearing expiration
+            check_document_expirations(conn)
 
             # Attempt seat upgrades for A-List accounts (48h before departure)
             attempt_seat_upgrades(conn)

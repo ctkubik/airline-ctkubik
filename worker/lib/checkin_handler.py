@@ -75,15 +75,27 @@ class CheckInHandler:
             self._thread.join(timeout=5)
 
     def _send_notification(self, success: bool, error: str = "") -> None:
-        """Send push/SMS notification for check-in result."""
+        """Send push/SMS notification for check-in result, routed to the owner."""
         try:
             from notifications import notify_checkin_success, notify_checkin_failed
+            from db import get_flight_owner
+
+            owner = None
+            try:
+                conn = self.db_conn_factory()
+                try:
+                    owner = get_flight_owner(conn, self.flight_db_id)
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
             route = f"{self.departure_airport} -> {self.destination_airport}"
             passenger = f"{self.first_name} {self.last_name}"
             if success:
-                notify_checkin_success(self.confirmation_number, route, passenger)
+                notify_checkin_success(self.confirmation_number, route, passenger, user_id=owner)
             else:
-                notify_checkin_failed(self.confirmation_number, route, passenger, error)
+                notify_checkin_failed(self.confirmation_number, route, passenger, error, user_id=owner)
         except Exception as e:
             logger.error("Failed to send notification: %s", e)
 

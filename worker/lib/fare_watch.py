@@ -342,7 +342,13 @@ def check_fare_watches(conn, notify_fn=None, interval_hours: float | None = None
                 + (f" (was ${previous_best:.2f})" if previous_best is not None else "")
             )
             try:
-                notify_fn(title, message)
+                # Route to the watch's creator (their own notification services).
+                owner_id = None
+                created_by = watch.get("created_by")
+                if created_by:
+                    row = conn.execute("SELECT id FROM users WHERE username = ?", (created_by,)).fetchone()
+                    owner_id = row["id"] if row else None
+                notify_fn(title, message, owner_id)
             except Exception as err:  # noqa: BLE001
                 logger.error("Fare watch notification failed: %s", err)
 

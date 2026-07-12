@@ -16,6 +16,7 @@ import {
   Search,
   UserCog,
   Wallet,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
@@ -42,6 +43,10 @@ const navSections: { heading: string; items: { href: string; label: string; icon
       { href: "/fare-watches", label: "Fare Watches", icon: Search },
       { href: "/credits", label: "Travel Credits", icon: Wallet },
     ],
+  },
+  {
+    heading: "Family",
+    items: [{ href: "/documents", label: "Documents", icon: FileText }],
   },
   {
     heading: "System",
