@@ -42,6 +42,10 @@ from db import (
     get_expiring_documents,
     set_reservation_owners_for_account,
     sync_travel_funds,
+    update_worker_heartbeat,
+    mark_account_login_success,
+    mark_account_login_error,
+    backup_database,
 )
 
 DOC_TYPE_LABELS = {
@@ -337,6 +341,7 @@ def process_accounts(conn: sqlite3.Connection) -> None:
 
             # Only deactivate for confirmed invalid credentials (Southwest code 400518024)
             # All other errors (429, 500, 502, 503, 401, 403, etc.) are treated as transient
+            mark_account_login_error(conn, account_id, str(e))
             is_bad_credentials = "Invalid credentials" in str(e)
             if is_bad_credentials:
                 # Increment failure counter, deactivate after 3 consecutive failures
@@ -350,6 +355,19 @@ def process_accounts(conn: sqlite3.Connection) -> None:
                     conn.execute("UPDATE accounts SET is_active = 0 WHERE id = ?", (account_id,))
                     conn.commit()
                     add_log(conn, f"Deactivated account {account['username']} after {failure_count} consecutive credential failures", "warning")
+                    # Tell the owner their Southwest login stopped working — it needs
+                    # their attention (password change, etc.), the app can't fix it.
+                    try:
+                        from notifications import send_notification
+                        who = account.get("display_name") or account["username"]
+                        send_notification(
+                            "Southwest login needs attention",
+                            f"The Southwest login for {who} failed 3 times and was paused. "
+                            f"Update the password on the Accounts page to resume check-ins.",
+                            user_id=account.get("owner_user_id"),
+                        )
+                    except Exception:
+                        pass
                 else:
                     add_log(conn, f"Login failure #{failure_count} for {account['username']} (will deactivate after 3)", "warning")
             else:
@@ -358,11 +376,11 @@ def process_accounts(conn: sqlite3.Connection) -> None:
         except Exception as e:
             logger.error("Failed to process account %s: %s", account["username"], e)
             add_log(conn, f"Failed to process account {account['username']}: {e} (transient, will retry)", "error")
+            mark_account_login_error(conn, account_id, str(e))
             continue
 
-        # Reset failure counter on successful login
-        conn.execute("UPDATE accounts SET login_failure_count = 0 WHERE id = ?", (account_id,))
-        conn.commit()
+        # Record successful login (resets failure counter + clears last error)
+        mark_account_login_success(conn, account_id)
 
         logger.info("Retrieved %d reservations for account %s", len(sw_reservations), account["username"])
         add_log(conn, f"Retrieved {len(sw_reservations)} reservations for {account['username']}", "info")
@@ -1387,6 +1405,14 @@ def run_daily_cleanup(conn: sqlite3.Connection) -> None:
     logger.info("Running daily data cleanup")
     add_log(conn, "Running daily data cleanup", "info")
 
+    # Daily database snapshot (keeps the last 7) before cleanup runs.
+    try:
+        backup_path = backup_database(conn, keep=7)
+        if backup_path:
+            add_log(conn, f"Database backup written: {os.path.basename(backup_path)}", "info")
+    except Exception as e:
+        logger.error("Database backup failed: %s", e)
+
     counts = cleanup_old_data(conn)
     total = sum(counts.values())
     if total > 0:
@@ -1501,7 +1527,17 @@ def main_loop() -> None:
             conn = get_db()
 
             # Ensure browser is alive and session is fresh
-            browser_session.ensure_alive()
+            browser_ok = True
+            try:
+                browser_session.ensure_alive()
+            except Exception:
+                browser_ok = False
+                raise
+            finally:
+                try:
+                    update_worker_heartbeat(conn, browser_ok)
+                except Exception:
+                    pass
 
             # Process accounts (login + retrieve reservations)
             process_accounts(conn)

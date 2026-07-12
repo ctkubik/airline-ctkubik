@@ -350,6 +350,9 @@ Built-in protections, designed for running behind a public URL:
 | Roles | Members use the app; only admins manage users; the last active admin can't be deleted or demoted |
 | Visibility | Every list and per-record API is scoped server-side by owner — a member cannot read or modify another user's accounts, flights, reservations, or credits even by direct id; admins see all |
 | Audit trail | Every login success, failure, and rate-limit event is logged with its IP in the Activity feed |
+| Two-factor auth | Optional per-user TOTP (authenticator app), enrolled from Settings; required at login when enabled |
+| Backups | The worker writes a daily database snapshot to `data/backups/` (keeps the last 7); data is exportable as JSON from Settings |
+| Health monitoring | A worker heartbeat + per-account login status surface a dashboard banner when the worker stalls or a Southwest login starts failing |
 
 Operational recommendations:
 - Set `AUTH_SECRET` and a strong `AUTH_PASSWORD` in `.env` (don't rely on the generated ones if the `data/` folder is shared or backed up somewhere less trusted)

@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Trash2, Plus, Save, MessageSquare } from "lucide-react";
 import type { NotificationConfig } from "@/lib/types";
 import { CalendarFeed } from "@/components/settings/calendar-feed";
+import { DataExport } from "@/components/settings/data-export";
+import { TwoFactor } from "@/components/settings/two-factor";
 
 const ALL_SEAT_LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -134,6 +136,12 @@ export default function SettingsPage() {
 
       {/* Calendar subscription */}
       <CalendarFeed />
+
+      {/* Two-factor auth */}
+      <TwoFactor />
+
+      {/* Data & backups */}
+      <DataExport />
 
       {/* Seat Preferences */}
       <Card>

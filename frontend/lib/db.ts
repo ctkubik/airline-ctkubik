@@ -39,7 +39,17 @@ function initTables(db: Database.Database) {
       display_name TEXT DEFAULT '',
       login_failure_count INTEGER DEFAULT 0,
       owner_user_id TEXT,
+      last_login_success TEXT,
+      last_login_error TEXT,
       created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS worker_status (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_poll_at TEXT,
+      browser_ok INTEGER DEFAULT 0,
+      note TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -156,6 +166,8 @@ function initTables(db: Database.Database) {
       role TEXT NOT NULL DEFAULT 'member',
       is_active INTEGER DEFAULT 1,
       calendar_token TEXT,
+      totp_secret TEXT,
+      totp_enabled INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -271,4 +283,8 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("users", "calendar_token", "calendar_token TEXT");
   addColumnIfMissing("notification_configs", "user_id", "user_id TEXT");
   addColumnIfMissing("notification_configs", "label", "label TEXT DEFAULT ''");
+  addColumnIfMissing("accounts", "last_login_success", "last_login_success TEXT");
+  addColumnIfMissing("accounts", "last_login_error", "last_login_error TEXT");
+  addColumnIfMissing("users", "totp_secret", "totp_secret TEXT");
+  addColumnIfMissing("users", "totp_enabled", "totp_enabled INTEGER DEFAULT 0");
 }

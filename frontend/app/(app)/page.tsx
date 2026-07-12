@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/flights/status-badge";
 import { CountdownTimer } from "@/components/flights/countdown-timer";
 import { Users, CalendarCheck, Plane, CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import type { DashboardStats, Flight, WorkerLog } from "@/lib/types";
+import { StatusBanner } from "@/components/layout/status-banner";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -45,6 +46,8 @@ export default function DashboardPage() {
         <div className="eyebrow mb-1">Overview</div>
         <h1 className="text-[28px] font-semibold tracking-tight">Dashboard</h1>
       </header>
+
+      <StatusBanner />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatTile icon={Users} label="Accounts" value={stats?.active_accounts ?? 0} tone="brand" />

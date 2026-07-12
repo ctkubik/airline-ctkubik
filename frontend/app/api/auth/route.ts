@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: configError }, { status: 500 });
   }
 
-  const { username, password } = await req.json();
+  const { username, password, code } = await req.json();
   if (typeof username !== "string" || typeof password !== "string") {
     return NextResponse.json({ error: "Username and password required" }, { status: 400 });
   }
@@ -35,12 +35,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const user = authenticateUser(username, password);
-  if (!user) {
+  const result = authenticateUser(username, password, typeof code === "string" ? code : undefined);
+  if (!result.ok) {
+    // A missing 2FA code after a correct password isn't a failed attempt — the
+    // client just needs to prompt for the code. Don't count it toward lockout.
+    if (result.reason === "totp_required") {
+      return NextResponse.json({ error: "2FA code required", totp_required: true }, { status: 401 });
+    }
     recordFailure(rlKey);
-    logAuthEvent(`Failed login for '${username}' from ${ip}`, "warning");
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
+    logAuthEvent(`Failed login for '${username}' from ${ip} (${result.reason})`, "warning");
+    const msg = result.reason === "totp_invalid" ? "Invalid 2FA code" : "Invalid credentials";
+    return NextResponse.json({ error: msg, totp_required: result.reason === "totp_invalid" }, { status: 401 });
   }
+  const user = result.user;
   recordSuccess(rlKey);
   logAuthEvent(`Login: ${user.username} (${user.role}) from ${ip}`, "info");
 

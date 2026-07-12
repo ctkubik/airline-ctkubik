@@ -300,10 +300,23 @@ export default function AccountsPage() {
                         </select>
                       </label>
                     )}
-                    <span className="text-sm text-gray-500">
-                      {account.reservation_count ?? 0} reservation
-                      {(account.reservation_count ?? 0) !== 1 ? "s" : ""}
-                    </span>
+                    <div className="text-right">
+                      <span className="text-sm text-gray-500">
+                        {account.reservation_count ?? 0} reservation
+                        {(account.reservation_count ?? 0) !== 1 ? "s" : ""}
+                      </span>
+                      <div className="text-[11px] mt-0.5">
+                        {account.last_login_error && (account.login_failure_count ?? 0) > 0 ? (
+                          <span className="text-[color:var(--danger)]">⚠ login failing</span>
+                        ) : account.last_login_success ? (
+                          <span className="text-[color:var(--faint)]">
+                            synced {new Date(account.last_login_success + "Z").toLocaleDateString()}
+                          </span>
+                        ) : (
+                          <span className="text-[color:var(--faint)]">not synced yet</span>
+                        )}
+                      </div>
+                    </div>
                     <Button
                       variant="outline"
                       size="sm"

@@ -13,6 +13,9 @@ export interface Account {
   owner_user_id?: string | null;
   owner_display_name?: string | null;
   owner_username?: string | null;
+  login_failure_count?: number;
+  last_login_success?: string | null;
+  last_login_error?: string | null;
 }
 
 export interface Reservation {

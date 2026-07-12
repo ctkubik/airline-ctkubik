@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { getDb } from "./db";
+import { decryptSecret } from "./secrets";
+import { verifyTotp } from "./totp";
 
 const AUTH_COOKIE = "sw-checkin-auth";
 const TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -51,12 +53,17 @@ export function authConfigError(): string | null {
   return null;
 }
 
+export type AuthResult =
+  | { ok: true; user: SessionUser }
+  | { ok: false; reason: "invalid" | "totp_required" | "totp_invalid" };
+
 /**
  * Check credentials against the users table, with the AUTH_USERNAME /
  * AUTH_PASSWORD environment pair acting as a break-glass admin login that
- * also bootstraps the first admin user row.
+ * also bootstraps the first admin user row. If the user has 2FA enabled, a
+ * valid TOTP `code` is also required.
  */
-export function authenticateUser(username: string, password: string): SessionUser | null {
+export function authenticateUser(username: string, password: string, code?: string): AuthResult {
   const db = getDb();
 
   const envPassword = getEnvPassword();
@@ -67,21 +74,45 @@ export function authenticateUser(username: string, password: string): SessionUse
   ) {
     // Ensure the env admin exists as a real user row so it shows up in the
     // Users page and can own things.
-    const existing = db.prepare("SELECT id FROM users WHERE username = ?").get(username);
+    const existing = db.prepare("SELECT id, totp_secret, totp_enabled FROM users WHERE username = ?").get(username) as
+      | { id: string; totp_secret: string | null; totp_enabled: number }
+      | undefined;
     if (!existing) {
       db.prepare(
         "INSERT INTO users (id, username, password_hash, display_name, role) VALUES (?, ?, ?, ?, 'admin')"
       ).run(crypto.randomUUID(), username, bcrypt.hashSync(password, 10), "Administrator");
+    } else {
+      const totp = checkTotp(existing, code);
+      if (totp !== "ok") return { ok: false, reason: totp };
     }
-    return { username, role: "admin" };
+    return { ok: true, user: { username, role: "admin" } };
   }
 
   const row = db
-    .prepare("SELECT username, password_hash, role, is_active FROM users WHERE username = ?")
-    .get(username) as { username: string; password_hash: string; role: string; is_active: number } | undefined;
-  if (!row || !row.is_active) return null;
-  if (!bcrypt.compareSync(password, row.password_hash)) return null;
-  return { username: row.username, role: row.role === "admin" ? "admin" : "member" };
+    .prepare("SELECT username, password_hash, role, is_active, totp_secret, totp_enabled FROM users WHERE username = ?")
+    .get(username) as
+    | { username: string; password_hash: string; role: string; is_active: number; totp_secret: string | null; totp_enabled: number }
+    | undefined;
+  if (!row || !row.is_active) return { ok: false, reason: "invalid" };
+  if (!bcrypt.compareSync(password, row.password_hash)) return { ok: false, reason: "invalid" };
+
+  const totp = checkTotp(row, code);
+  if (totp !== "ok") return { ok: false, reason: totp };
+
+  return { ok: true, user: { username: row.username, role: row.role === "admin" ? "admin" : "member" } };
+}
+
+function checkTotp(
+  row: { totp_secret: string | null; totp_enabled: number },
+  code?: string
+): "ok" | "totp_required" | "totp_invalid" {
+  if (!row.totp_enabled || !row.totp_secret) return "ok";
+  if (!code) return "totp_required";
+  try {
+    return verifyTotp(decryptSecret(row.totp_secret), code) ? "ok" : "totp_invalid";
+  } catch {
+    return "totp_invalid";
+  }
 }
 
 function timingSafeStringEqual(a: string, b: string): boolean {

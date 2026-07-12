@@ -8,7 +8,7 @@ import { getAccessContext, ownerScope } from "@/lib/access";
 const ACCOUNT_COLUMNS =
   "a.id, a.username, a.display_name, a.is_active, a.retrieval_interval, " +
   "a.is_alist, a.auto_upgrade_seats, a.login_failure_count, a.owner_user_id, " +
-  "a.created_at, a.updated_at";
+  "a.last_login_success, a.last_login_error, a.created_at, a.updated_at";
 
 export function GET() {
   const ctx = getAccessContext();

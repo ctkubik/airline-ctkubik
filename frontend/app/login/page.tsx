@@ -9,6 +9,8 @@ import { Plane, AlertCircle } from "lucide-react";
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [needCode, setNeedCode] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -21,7 +23,7 @@ export default function LoginPage() {
     const res = await fetch("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, code: needCode ? code : undefined }),
     });
 
     if (res.ok) {
@@ -29,7 +31,12 @@ export default function LoginPage() {
       router.refresh();
     } else {
       const body = await res.json().catch(() => null);
-      setError(body?.error || "Invalid username or password");
+      if (body?.totp_required) {
+        setNeedCode(true);
+        setError(body?.error === "2FA code required" ? "" : body?.error || "");
+      } else {
+        setError(body?.error || "Invalid username or password");
+      }
     }
     setLoading(false);
   }
@@ -116,8 +123,27 @@ export default function LoginPage() {
                 required
               />
             </div>
+            {needCode && (
+              <div>
+                <label className="mb-1.5 block text-[13px] font-medium text-[color:var(--ink-soft)]">
+                  Authenticator code
+                </label>
+                <Input
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="6-digit code"
+                  autoFocus
+                  required
+                />
+                <p className="mt-1 text-xs text-[color:var(--faint)]">
+                  Open your authenticator app and enter the current code.
+                </p>
+              </div>
+            )}
             <Button type="submit" size="lg" className="w-full" disabled={loading}>
-              {loading ? "Signing in…" : "Sign In"}
+              {loading ? "Signing in…" : needCode ? "Verify & Sign In" : "Sign In"}
             </Button>
           </form>
 

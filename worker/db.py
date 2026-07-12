@@ -41,6 +41,13 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS worker_status (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            last_poll_at TEXT,
+            browser_ok INTEGER DEFAULT 0,
+            note TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS reservations (
             id TEXT PRIMARY KEY,
             account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
@@ -134,6 +141,8 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             role TEXT NOT NULL DEFAULT 'member',
             is_active INTEGER DEFAULT 1,
             calendar_token TEXT,
+            totp_secret TEXT,
+            totp_enabled INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -270,9 +279,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if "external_id" not in tc_cols:
             conn.execute("ALTER TABLE travel_credits ADD COLUMN external_id TEXT")
 
+    if "last_login_success" not in account_cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN last_login_success TEXT")
+    if "last_login_error" not in account_cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN last_login_error TEXT")
+
     user_cols = [row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
-    if user_cols and "calendar_token" not in user_cols:
-        conn.execute("ALTER TABLE users ADD COLUMN calendar_token TEXT")
+    if user_cols:
+        if "calendar_token" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN calendar_token TEXT")
+        if "totp_secret" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT")
+        if "totp_enabled" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0")
 
     nc_cols = [row[1] for row in conn.execute("PRAGMA table_info(notification_configs)").fetchall()]
     if nc_cols:
@@ -702,6 +721,36 @@ def get_notification_configs(conn: sqlite3.Connection, user_id: str | None = Non
     return [dict(r) for r in rows]
 
 
+def update_worker_heartbeat(conn: sqlite3.Connection, browser_ok: bool, note: str = "") -> None:
+    """Record that the worker loop is alive (for stale-worker detection)."""
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        "INSERT INTO worker_status (id, last_poll_at, browser_ok, note, updated_at) "
+        "VALUES (1, ?, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET last_poll_at = excluded.last_poll_at, "
+        "browser_ok = excluded.browser_ok, note = excluded.note, updated_at = excluded.updated_at",
+        (now, 1 if browser_ok else 0, note, now),
+    )
+    conn.commit()
+
+
+def mark_account_login_success(conn: sqlite3.Connection, account_id: str) -> None:
+    conn.execute(
+        "UPDATE accounts SET last_login_success = ?, last_login_error = NULL, "
+        "login_failure_count = 0 WHERE id = ?",
+        (datetime.utcnow().isoformat(), account_id),
+    )
+    conn.commit()
+
+
+def mark_account_login_error(conn: sqlite3.Connection, account_id: str, error: str) -> None:
+    conn.execute(
+        "UPDATE accounts SET last_login_error = ? WHERE id = ?",
+        (str(error)[:300], account_id),
+    )
+    conn.commit()
+
+
 def get_flight_owner(conn: sqlite3.Connection, flight_id: str) -> str | None:
     row = conn.execute(
         "SELECT r.owner_user_id AS owner FROM flights f "
@@ -772,6 +821,39 @@ def cleanup_old_data(conn: sqlite3.Connection) -> dict[str, int]:
                 pass  # VACUUM can fail if another connection holds a lock
 
     return counts
+
+
+def backup_database(conn: sqlite3.Connection, keep: int = 7) -> str | None:
+    """Write a consistent snapshot of the DB via VACUUM INTO, keep last `keep`.
+
+    VACUUM INTO is safe on a live WAL database (it takes a read snapshot), so
+    this can run alongside the frontend and check-in threads. Returns the
+    backup path, or None on failure.
+    """
+    backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(backup_dir, f"checkin-{stamp}.db")
+    try:
+        conn.execute("VACUUM INTO ?", (dest,))
+    except Exception:
+        return None
+
+    # Retention: keep the newest `keep` backups.
+    try:
+        backups = sorted(
+            (os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith(".db")),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        for old in backups[keep:]:
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return dest
 
 
 def get_stale_capture_dirs(conn: sqlite3.Connection) -> list[str]:
