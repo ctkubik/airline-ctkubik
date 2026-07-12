@@ -15,10 +15,28 @@ interface Doc {
   doc_type: string;
   label: string;
   holder_name: string;
+  airline: string | null;
   number: string;
   expiration_date: string | null;
   notes: string;
 }
+
+// Carriers a loyalty/frequent-flyer number can belong to (2-letter IATA).
+const LOYALTY_AIRLINES: { code: string; name: string }[] = [
+  { code: "WN", name: "Southwest Rapid Rewards" },
+  { code: "AA", name: "American AAdvantage" },
+  { code: "DL", name: "Delta SkyMiles" },
+  { code: "UA", name: "United MileagePlus" },
+  { code: "AS", name: "Alaska Mileage Plan" },
+  { code: "B6", name: "JetBlue TrueBlue" },
+  { code: "F9", name: "Frontier Miles" },
+  { code: "NK", name: "Spirit Free Spirit" },
+  { code: "HA", name: "Hawaiian HawaiianMiles" },
+  { code: "AC", name: "Air Canada Aeroplan" },
+  { code: "BA", name: "British Airways Executive Club" },
+];
+const airlineName = (code: string | null) =>
+  code ? LOYALTY_AIRLINES.find((a) => a.code === code)?.name || code : "";
 
 const DOC_TYPES: { value: string; label: string }[] = [
   { value: "passport", label: "Passport" },
@@ -45,6 +63,7 @@ export default function DocumentsPage() {
     doc_type: "passport",
     holder_name: "",
     label: "",
+    airline: "",
     number: "",
     expiration_date: "",
     notes: "",
@@ -73,7 +92,7 @@ export default function DocumentsPage() {
       body: JSON.stringify(form),
     });
     if (res.ok) {
-      setForm({ doc_type: "passport", holder_name: "", label: "", number: "", expiration_date: "", notes: "" });
+      setForm({ doc_type: "passport", holder_name: "", label: "", airline: "", number: "", expiration_date: "", notes: "" });
       setShowForm(false);
       await load();
     } else {
@@ -168,6 +187,23 @@ export default function DocumentsPage() {
                   onChange={(e) => setForm({ ...form, label: e.target.value })}
                 />
               </div>
+              {form.doc_type === "loyalty" && (
+                <div>
+                  <label className="eyebrow mb-1 block">Airline</label>
+                  <select
+                    value={form.airline}
+                    onChange={(e) => setForm({ ...form, airline: e.target.value })}
+                    className="h-10 w-full rounded-[var(--radius-sm)] border border-[color:var(--line-strong)] bg-[color:var(--surface)] px-3 text-sm"
+                  >
+                    <option value="">Pick airline…</option>
+                    {LOYALTY_AIRLINES.map((a) => (
+                      <option key={a.code} value={a.code}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="eyebrow mb-1 block">Number (encrypted)</label>
                 <Input
@@ -220,7 +256,7 @@ export default function DocumentsPage() {
                     {d.label || typeLabel(d.doc_type)}
                   </div>
                   <div className="text-xs text-[color:var(--muted)]">
-                    {typeLabel(d.doc_type)}
+                    {d.doc_type === "loyalty" && d.airline ? airlineName(d.airline) : typeLabel(d.doc_type)}
                     {d.holder_name ? ` · ${d.holder_name}` : ""}
                   </div>
                 </div>

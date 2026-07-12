@@ -48,7 +48,7 @@ export function GET() {
 export async function POST(req: NextRequest) {
   const ctx = getAccessContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { doc_type, label, holder_name, number, expiration_date, notes, owner_user_id } =
+  const { doc_type, label, holder_name, number, expiration_date, notes, owner_user_id, airline } =
     await req.json();
 
   const type = DOC_TYPES.includes(doc_type) ? doc_type : "other";
@@ -59,19 +59,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Expiration must be a date (YYYY-MM-DD)" }, { status: 400 });
   }
   const owner = ctx.isAdmin && owner_user_id ? owner_user_id : ctx.userId;
+  // Airline is only meaningful for loyalty/frequent-flyer numbers.
+  const airlineCode =
+    type === "loyalty" && airline ? String(airline).toUpperCase().slice(0, 3) : null;
 
   const db = getDb();
   const id = crypto.randomUUID();
   db.prepare(
     `INSERT INTO documents
-     (id, owner_user_id, doc_type, label, holder_name, number_enc, expiration_date, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+     (id, owner_user_id, doc_type, label, holder_name, airline, number_enc, expiration_date, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     owner,
     type,
     label || "",
     holder_name || "",
+    airlineCode,
     number ? encryptSecret(String(number)) : "",
     expiration_date || null,
     notes || ""

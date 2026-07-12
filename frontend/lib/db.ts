@@ -190,6 +190,7 @@ function initTables(db: Database.Database) {
       doc_type TEXT NOT NULL DEFAULT 'other',
       label TEXT DEFAULT '',
       holder_name TEXT DEFAULT '',
+      airline TEXT,
       number_enc TEXT DEFAULT '',
       expiration_date TEXT,
       notes TEXT DEFAULT '',
@@ -318,6 +319,7 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("flights", "airline", "airline TEXT");
   addColumnIfMissing("flights", "auto_checkin", "auto_checkin INTEGER DEFAULT 1");
   addColumnIfMissing("flights", "checkin_reminder_sent", "checkin_reminder_sent INTEGER DEFAULT 0");
+  addColumnIfMissing("documents", "airline", "airline TEXT");
   addColumnIfMissing("flights", "trip_id", "trip_id TEXT");
   addColumnIfMissing("flights", "aircraft", "aircraft TEXT");
   addColumnIfMissing("flights", "arrival_status", "arrival_status TEXT");

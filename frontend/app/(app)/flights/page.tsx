@@ -7,7 +7,7 @@ import { CountdownTimer } from "@/components/flights/countdown-timer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Camera } from "lucide-react";
+import { Camera, Eye, EyeOff } from "lucide-react";
 import type { WorkerLog } from "@/lib/types";
 
 // Common US carriers for the manual "Add Flight" form (2-letter IATA codes).
@@ -71,11 +71,14 @@ interface FlightWithFare {
   assigned_seat?: string;
   flight_status?: string | null;
   flight_status_detail?: string | null;
+  aircraft?: string | null;
+  arrival_status?: string | null;
   airline?: string | null;
   auto_checkin?: number;
   confirmation_number: string;
   first_name: string;
   last_name: string;
+  owner_user_id?: string | null;
   original_price?: number | null;
   original_currency?: string;
   latest_fare: FareInfo | null;
@@ -101,6 +104,82 @@ function FlightStatusChip({ status, detail }: { status?: string | null; detail?:
       {s.label}
     </span>
   );
+}
+
+interface LoyaltyDoc {
+  id: string;
+  doc_type: string;
+  airline: string | null;
+  holder_name: string;
+  number: string;
+  owner_user_id: string | null;
+}
+
+// The frequent-flyer number that belongs to a flight: same airline (Southwest
+// stored as WN) and same owner. When several holders share an owner, prefer the
+// one whose name matches the passenger.
+function matchLoyalty(flight: FlightWithFare, docs: LoyaltyDoc[]): LoyaltyDoc | null {
+  const carrier = (flight.airline || "WN").toUpperCase();
+  const candidates = docs.filter(
+    (d) =>
+      d.doc_type === "loyalty" &&
+      (d.airline || "").toUpperCase() === carrier &&
+      (!flight.owner_user_id || !d.owner_user_id || d.owner_user_id === flight.owner_user_id)
+  );
+  if (candidates.length === 0) return null;
+  const first = (flight.first_name || "").trim().toLowerCase();
+  const byName = candidates.find((d) => (d.holder_name || "").trim().toLowerCase().includes(first) && first);
+  return byName || candidates[0];
+}
+
+function maskLoyalty(n: string): string {
+  if (!n) return "—";
+  return n.length <= 4 ? "••" + n : "•••• " + n.slice(-4);
+}
+
+function loyaltyLabel(airline: string | null): string {
+  const names: Record<string, string> = {
+    WN: "Rapid Rewards",
+    AA: "AAdvantage",
+    DL: "SkyMiles",
+    UA: "MileagePlus",
+    AS: "Mileage Plan",
+    B6: "TrueBlue",
+    F9: "Frontier Miles",
+    NK: "Free Spirit",
+    HA: "HawaiianMiles",
+    AC: "Aeroplan",
+    BA: "Executive Club",
+  };
+  return names[(airline || "").toUpperCase()] || "Frequent flyer";
+}
+
+function ArrivalChip({ status }: { status?: string | null }) {
+  if (!status) return null;
+  const styles: Record<string, { bg: string; fg: string; label: string }> = {
+    en_route: { bg: "var(--accent-tint)", fg: "var(--accent-hover)", label: "In the air" },
+    landing: { bg: "var(--accent-tint)", fg: "var(--accent-hover)", label: "Landing soon" },
+    arrived: { bg: "var(--success-tint)", fg: "var(--success)", label: "Arrived" },
+    diverted: { bg: "var(--warning-tint)", fg: "var(--warning)", label: "Diverted" },
+  };
+  const s = styles[status];
+  if (!s) return null;
+  return (
+    <span
+      className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold"
+      style={{ backgroundColor: s.bg, color: s.fg }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+// The gate/terminal/baggage part of the status detail — everything after the
+// first "· ". Shown even when a flight is "On time" so the gate is always handy.
+function dayOfLocation(detail?: string | null): string | null {
+  if (!detail) return null;
+  const idx = detail.indexOf("· ");
+  return idx >= 0 ? detail.slice(idx + 2).trim() : null;
 }
 
 function formatFare(fare: FareInfo | null): string {
@@ -133,6 +212,8 @@ export default function FlightsPage() {
   const [editingFare, setEditingFare] = useState<string | null>(null);
   const [fareInput, setFareInput] = useState("");
   const [loggedCredits, setLoggedCredits] = useState<Set<string>>(new Set());
+  const [loyalty, setLoyalty] = useState<LoyaltyDoc[]>([]);
+  const [revealLoyalty, setRevealLoyalty] = useState<Set<string>>(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
@@ -221,8 +302,12 @@ export default function FlightsPage() {
   }, []);
 
   async function fetchFlights() {
-    const res = await fetch("/api/flights");
-    setFlights(await res.json());
+    const [fRes, dRes] = await Promise.all([fetch("/api/flights"), fetch("/api/documents")]);
+    setFlights(await fRes.json());
+    if (dRes.ok) {
+      const data = await dRes.json();
+      setLoyalty((data.documents || []).filter((d: LoyaltyDoc) => d.doc_type === "loyalty"));
+    }
   }
 
   async function expandFlight(flightId: string) {
@@ -435,7 +520,52 @@ export default function FlightsPage() {
                           </span>
                         )}
                         <FlightStatusChip status={flight.flight_status} detail={flight.flight_status_detail} />
+                        <ArrivalChip status={flight.arrival_status} />
                       </div>
+                      {(() => {
+                        const loc = dayOfLocation(flight.flight_status_detail);
+                        const ff = matchLoyalty(flight, loyalty);
+                        if (!loc && !flight.aircraft && !ff) return null;
+                        return (
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-[color:var(--muted)]">
+                            {loc && <span className="font-mono">{loc}</span>}
+                            {flight.aircraft && (
+                              <span className="rounded bg-[color:var(--surface-2)] px-1.5 py-0.5 text-[11px] text-[color:var(--faint)]">
+                                {flight.aircraft}
+                              </span>
+                            )}
+                            {ff && ff.number && (
+                              <span
+                                className="flex items-center gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <span className="text-[color:var(--faint)]">{loyaltyLabel(ff.airline)}</span>
+                                <span className="font-mono text-[color:var(--ink-soft)]">
+                                  {revealLoyalty.has(flight.id) ? ff.number : maskLoyalty(ff.number)}
+                                </span>
+                                <button
+                                  onClick={() =>
+                                    setRevealLoyalty((s) => {
+                                      const n = new Set(s);
+                                      if (n.has(flight.id)) n.delete(flight.id);
+                                      else n.add(flight.id);
+                                      return n;
+                                    })
+                                  }
+                                  className="text-[color:var(--faint)] hover:text-[color:var(--accent)]"
+                                  aria-label={revealLoyalty.has(flight.id) ? "Hide number" : "Reveal number"}
+                                >
+                                  {revealLoyalty.has(flight.id) ? (
+                                    <EyeOff className="h-3 w-3" />
+                                  ) : (
+                                    <Eye className="h-3 w-3" />
+                                  )}
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="text-[13px]">
                       <div className="font-medium text-[color:var(--ink-soft)]">

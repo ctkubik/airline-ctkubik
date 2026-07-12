@@ -152,6 +152,7 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             doc_type TEXT NOT NULL DEFAULT 'other',
             label TEXT DEFAULT '',
             holder_name TEXT DEFAULT '',
+            airline TEXT,
             number_enc TEXT DEFAULT '',
             expiration_date TEXT,
             notes TEXT DEFAULT '',
@@ -329,6 +330,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT")
         if "totp_enabled" not in user_cols:
             conn.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0")
+
+    doc_cols = [row[1] for row in conn.execute("PRAGMA table_info(documents)").fetchall()]
+    if doc_cols and "airline" not in doc_cols:
+        conn.execute("ALTER TABLE documents ADD COLUMN airline TEXT")
 
     nc_cols = [row[1] for row in conn.execute("PRAGMA table_info(notification_configs)").fetchall()]
     if nc_cols:

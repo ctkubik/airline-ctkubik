@@ -34,6 +34,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     fields.push("holder_name = ?");
     values.push(String(body.holder_name));
   }
+  if (body.airline !== undefined) {
+    fields.push("airline = ?");
+    values.push(body.airline ? String(body.airline).toUpperCase().slice(0, 3) : null);
+  }
   if (body.number !== undefined) {
     fields.push("number_enc = ?");
     values.push(body.number ? encryptSecret(String(body.number)) : "");

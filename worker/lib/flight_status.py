@@ -83,10 +83,24 @@ class AeroDataBoxClient:
         return data or []
 
 
-def _aerodatabox_status(client: AeroDataBoxClient, carrier: str, number: str, dep_date: str, flight: dict) -> tuple[str, str]:
+def _aircraft_label(leg: dict) -> str | None:
+    """Human aircraft label from AeroDataBox's aircraft block, e.g. 'Boeing 737-800'."""
+    ac = leg.get("aircraft") or {}
+    model = ac.get("model") or ac.get("modeS") or None
+    reg = ac.get("reg")
+    if model and reg:
+        return f"{model} ({reg})"
+    return model or (f"Reg {reg}" if reg else None)
+
+
+def _aerodatabox_status(
+    client: AeroDataBoxClient, carrier: str, number: str, dep_date: str, flight: dict
+) -> tuple[str, str, dict]:
+    """Return (status, human detail, extra) where extra carries structured
+    day-of info: aircraft, arrival_status, and departure gate/terminal."""
     data = client.get_flight(f"{carrier}{number}", dep_date)
     if not data:
-        return "unavailable", "Not found in live flight data (possibly cancelled or changed)"
+        return "unavailable", "Not found in live flight data (possibly cancelled or changed)", {}
 
     dep_ap = flight.get("departure_airport")
     leg = next(
@@ -95,6 +109,7 @@ def _aerodatabox_status(client: AeroDataBoxClient, carrier: str, number: str, de
     )
     st = (leg.get("status") or "").lower()
     dep = leg.get("departure") or {}
+    arr = leg.get("arrival") or {}
     gate = dep.get("gate")
     terminal = dep.get("terminal")
     loc_bits = []
@@ -104,10 +119,33 @@ def _aerodatabox_status(client: AeroDataBoxClient, carrier: str, number: str, de
         loc_bits.append(f"Gate {gate}")
     loc = (" · " + ", ".join(loc_bits)) if loc_bits else ""
 
+    extra: dict = {"aircraft": _aircraft_label(leg), "gate": gate, "terminal": terminal}
+
+    # Arrival tracking: once a flight is airborne or down, report where it stands
+    # and (on arrival) the baggage belt — the last actionable day-of detail.
+    baggage = arr.get("baggageBelt")
+    arr_bits = []
+    if arr.get("terminal"):
+        arr_bits.append(f"Terminal {arr['terminal']}")
+    if arr.get("gate"):
+        arr_bits.append(f"Gate {arr['gate']}")
+    if baggage:
+        arr_bits.append(f"Baggage {baggage}")
+    arr_loc = (" · " + ", ".join(arr_bits)) if arr_bits else ""
+
     if "cancel" in st:
-        return "cancelled", "Flight cancelled" + loc
+        return "cancelled", "Flight cancelled" + loc, extra
     if "divert" in st:
-        return "delayed", "Diverted" + loc
+        extra["arrival_status"] = "diverted"
+        return "delayed", "Diverted" + loc, extra
+    if any(k in st for k in ("arrived", "landed", "gatearrival")):
+        extra["arrival_status"] = "arrived"
+        return "scheduled", ("Arrived" + arr_loc), extra
+    if "approach" in st:
+        extra["arrival_status"] = "landing"
+        return "scheduled", ("Landing soon" + arr_loc), extra
+    if any(k in st for k in ("enroute", "airborne", "departed")):
+        extra["arrival_status"] = "en_route"
 
     sched = _parse_time((dep.get("scheduledTime") or {}).get("utc"))
     revised = _parse_time(
@@ -123,9 +161,9 @@ def _aerodatabox_status(client: AeroDataBoxClient, carrier: str, number: str, de
             local = (dep.get("revisedTime") or {}).get("local") or revised.isoformat()
             when = f", now {str(local)[:16]}"
         mins = f" ~{int(delay_min)} min" if delay_min >= 1 else ""
-        return "delayed", f"Delayed{mins}{when}{loc}"
+        return "delayed", f"Delayed{mins}{when}{loc}", extra
 
-    return "scheduled", ("On time" + loc)
+    return "scheduled", ("On time" + loc), extra
 
 
 # ── Amadeus schedule (fallback) ──────────────────────────────────────────
@@ -143,36 +181,46 @@ def _scheduled_departure(resp: dict, departure_airport: str) -> str | None:
     return None
 
 
-def _amadeus_status(resp: dict, flight: dict) -> tuple[str, str]:
+def _amadeus_status(resp: dict, flight: dict) -> tuple[str, str, dict]:
     data = resp.get("data") or []
     if not data:
-        return "unavailable", "Not found in the airline schedule (possibly cancelled or changed)"
+        return "unavailable", "Not found in the airline schedule (possibly cancelled or changed)", {}
     sched = _parse_time(_scheduled_departure(resp, flight.get("departure_airport", "")))
     if not sched:
-        return "scheduled", "On schedule"
+        return "scheduled", "On schedule", {}
     stored = _parse_time(flight.get("departure_time"))
     if not stored:
-        return "scheduled", "On schedule"
+        return "scheduled", "On schedule", {}
     delta_min = abs(sched.timestamp() - stored.timestamp()) / 60.0
     if delta_min >= SIGNIFICANT_SHIFT_MIN:
         local = sched.strftime("%b %d %I:%M %p")
-        return "schedule_changed", f"Departure now {local} (shifted ~{int(delta_min)} min)"
-    return "scheduled", "On schedule"
+        return "schedule_changed", f"Departure now {local} (shifted ~{int(delta_min)} min)", {}
+    return "scheduled", "On schedule", {}
 
 
 # ── Shared driver ────────────────────────────────────────────────────────
 
-def _update(conn, flight_id: str, status: str, detail: str) -> None:
-    conn.execute(
-        "UPDATE flights SET flight_status = ?, flight_status_detail = ?, "
-        "flight_status_checked_at = ? WHERE id = ?",
-        (status, detail, datetime.utcnow().isoformat(), flight_id),
-    )
+def _update(conn, flight_id: str, status: str, detail: str, extra: dict | None = None) -> None:
+    extra = extra or {}
+    # Only overwrite aircraft/arrival_status when the provider actually returned
+    # them, so a later 'unknown' check doesn't wipe good day-of data.
+    sets = ["flight_status = ?", "flight_status_detail = ?", "flight_status_checked_at = ?"]
+    params: list = [status, detail, datetime.utcnow().isoformat()]
+    if extra.get("aircraft"):
+        sets.append("aircraft = ?")
+        params.append(extra["aircraft"])
+    if extra.get("arrival_status"):
+        sets.append("arrival_status = ?")
+        params.append(extra["arrival_status"])
+    params.append(flight_id)
+    conn.execute(f"UPDATE flights SET {', '.join(sets)} WHERE id = ?", params)
     conn.commit()
 
 
 # States worth a push notification (once each).
 ACTIONABLE = ("delayed", "cancelled", "schedule_changed", "unavailable")
+# Arrival states worth a single "they've landed" push.
+ARRIVAL_NOTIFY = ("arrived",)
 
 
 def check_flight_statuses(conn, notify_fn=None) -> None:
@@ -215,13 +263,13 @@ def check_flight_statuses(conn, notify_fn=None) -> None:
 
         try:
             if provider == "aerodatabox":
-                status, detail = _aerodatabox_status(adb, carrier, number, dep_date, flight)
+                status, detail, extra = _aerodatabox_status(adb, carrier, number, dep_date, flight)
             else:
                 resp = amadeus.get(
                     "/v2/schedule/flights",
                     {"carrierCode": carrier, "flightNumber": number, "scheduledDepartureDate": dep_date},
                 )
-                status, detail = _amadeus_status(resp, flight)
+                status, detail, extra = _amadeus_status(resp, flight)
         except FareWatchApiError as err:
             _update(conn, flight["id"], "unknown", f"Status unavailable ({err.status_code})")
             time.sleep(0.3)
@@ -230,7 +278,30 @@ def check_flight_statuses(conn, notify_fn=None) -> None:
             logger.warning("Flight status check failed for %s%s: %s", carrier, number, err)
             continue
 
-        _update(conn, flight["id"], status, detail)
+        _update(conn, flight["id"], status, detail, extra)
+
+        # Arrival push: fire once when the flight lands, independent of the
+        # departure-status notification (a flight can be delayed, then arrive).
+        arr_status = extra.get("arrival_status")
+        if (
+            notify_fn
+            and arr_status in ARRIVAL_NOTIFY
+            and flight.get("arrival_notified") != arr_status
+        ):
+            route = f"{flight.get('departure_airport')}->{flight.get('destination_airport')}"
+            try:
+                notify_fn(
+                    "Flight arrived",
+                    f"{route} ({flight.get('confirmation_number')}): {detail}",
+                    flight.get("owner_user_id"),
+                )
+                conn.execute(
+                    "UPDATE flights SET arrival_notified = ? WHERE id = ?",
+                    (arr_status, flight["id"]),
+                )
+                conn.commit()
+            except Exception as err:  # noqa: BLE001
+                logger.error("Arrival notification failed: %s", err)
 
         if notify_fn and status in ACTIONABLE and flight.get("flight_status_notified") != status:
             route = f"{flight.get('departure_airport')}->{flight.get('destination_airport')}"
