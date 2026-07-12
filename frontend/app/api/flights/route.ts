@@ -1,8 +1,69 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getDb } from "@/lib/db";
 import { getAccessContext, ownerScope } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
+
+const IATA = /^[A-Za-z]{3}$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Manually add a flight on any airline (not Southwest). It's tracked for
+ * status + calendar + check-in reminders, but never auto-checked-in. Backed by
+ * a lightweight non-Southwest reservation so it groups like everything else.
+ */
+export async function POST(req: NextRequest) {
+  const ctx = getAccessContext();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json();
+  const airline = String(body.airline || "").toUpperCase().trim();
+  const flightNumber = String(body.flight_number || "").replace(/\s+/g, "").trim();
+  const departureDate = String(body.departure_date || "");
+  const departureTime = String(body.departure_time || "").trim();
+  const from = String(body.departure_airport || "").toUpperCase().trim();
+  const to = String(body.destination_airport || "").toUpperCase().trim();
+  const passengerFirst = String(body.passenger_first || "").trim();
+  const passengerLast = String(body.passenger_last || "").trim();
+  const confirmation = String(body.confirmation_number || "").toUpperCase().trim();
+
+  if (!airline || !/^[A-Z0-9]{2,3}$/.test(airline)) {
+    return NextResponse.json({ error: "Pick an airline (2-letter carrier code)" }, { status: 400 });
+  }
+  if (!flightNumber || !/^\d{1,5}$/.test(flightNumber)) {
+    return NextResponse.json({ error: "Enter the flight number (digits only)" }, { status: 400 });
+  }
+  if (!ISO_DATE.test(departureDate)) {
+    return NextResponse.json({ error: "Departure date is required" }, { status: 400 });
+  }
+  if (from && !IATA.test(from)) {
+    return NextResponse.json({ error: "From must be a 3-letter airport code" }, { status: 400 });
+  }
+  if (to && !IATA.test(to)) {
+    return NextResponse.json({ error: "To must be a 3-letter airport code" }, { status: 400 });
+  }
+
+  const owner = ctx.isAdmin && body.owner_user_id ? body.owner_user_id : ctx.userId;
+  const departure = `${departureDate}T${(departureTime || "00:00").slice(0, 5)}:00`;
+
+  const db = getDb();
+  const resId = crypto.randomUUID();
+  db.prepare(
+    "INSERT INTO reservations (id, confirmation_number, first_name, last_name, owner_user_id, is_southwest) VALUES (?, ?, ?, ?, ?, 0)"
+  ).run(resId, confirmation || "-", passengerFirst || "", passengerLast || "", owner);
+
+  const flightId = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO flights
+       (id, reservation_id, flight_number, departure_airport, destination_airport,
+        departure_time, airline, auto_checkin, checkin_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'pending')`
+  ).run(flightId, resId, flightNumber, from, to, departure, airline);
+
+  const flight = db.prepare("SELECT * FROM flights WHERE id = ?").get(flightId);
+  return NextResponse.json(flight, { status: 201 });
+}
 
 export function GET() {
   const ctx = getAccessContext();

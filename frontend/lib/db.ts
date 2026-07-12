@@ -61,6 +61,7 @@ function initTables(db: Database.Database) {
       last_name TEXT NOT NULL,
       is_active INTEGER DEFAULT 1,
       owner_user_id TEXT,
+      is_southwest INTEGER DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -85,6 +86,9 @@ function initTables(db: Database.Database) {
       flight_status_detail TEXT,
       flight_status_checked_at TEXT,
       flight_status_notified TEXT,
+      airline TEXT,
+      auto_checkin INTEGER DEFAULT 1,
+      checkin_reminder_sent INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -295,4 +299,8 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("flights", "flight_status_detail", "flight_status_detail TEXT");
   addColumnIfMissing("flights", "flight_status_checked_at", "flight_status_checked_at TEXT");
   addColumnIfMissing("flights", "flight_status_notified", "flight_status_notified TEXT");
+  addColumnIfMissing("flights", "airline", "airline TEXT");
+  addColumnIfMissing("flights", "auto_checkin", "auto_checkin INTEGER DEFAULT 1");
+  addColumnIfMissing("flights", "checkin_reminder_sent", "checkin_reminder_sent INTEGER DEFAULT 0");
+  addColumnIfMissing("reservations", "is_southwest", "is_southwest INTEGER DEFAULT 1");
 }

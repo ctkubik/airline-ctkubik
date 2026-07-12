@@ -424,7 +424,8 @@ def process_accounts(conn: sqlite3.Connection) -> None:
 def process_manual_reservations(conn: sqlite3.Connection) -> None:
     """Process reservations not linked to any account."""
     reservations = conn.execute(
-        "SELECT * FROM reservations WHERE account_id IS NULL AND is_active = 1"
+        "SELECT * FROM reservations WHERE account_id IS NULL AND is_active = 1 "
+        "AND (is_southwest = 1 OR is_southwest IS NULL)"
     ).fetchall()
 
     for res_row in reservations:
@@ -1349,7 +1350,7 @@ def check_named_fare_watches(conn: sqlite3.Connection) -> None:
 
 
 def check_day_of_travel_status(conn: sqlite3.Connection) -> None:
-    """Check upcoming flights' schedule status (Amadeus-based, browser-free)."""
+    """Check upcoming flights' schedule status (browser-free provider)."""
     try:
         from lib.flight_status import check_flight_statuses
         from notifications import send_notification
@@ -1357,6 +1358,46 @@ def check_day_of_travel_status(conn: sqlite3.Connection) -> None:
         check_flight_statuses(conn, notify_fn=send_notification)
     except Exception as e:
         logger.error("Flight status check failed: %s", e)
+
+
+def check_other_airline_checkin_reminders(conn: sqlite3.Connection) -> None:
+    """Remind the owner when a non-Southwest flight's check-in opens (~24h out).
+
+    The app can't auto-check-in non-Southwest flights, so it nudges the traveler
+    to do it in that airline's app. Sent once per flight, ~24h before departure.
+    """
+    try:
+        from notifications import send_notification
+
+        now = datetime.utcnow()
+        window_start = (now + timedelta(hours=23)).isoformat()
+        window_end = (now + timedelta(hours=25)).isoformat()
+        rows = conn.execute(
+            "SELECT f.*, r.owner_user_id AS owner_user_id, r.confirmation_number AS confirmation_number "
+            "FROM flights f JOIN reservations r ON r.id = f.reservation_id "
+            "WHERE (f.auto_checkin = 0) AND (f.checkin_reminder_sent = 0 OR f.checkin_reminder_sent IS NULL) "
+            "AND f.departure_time > ? AND f.departure_time <= ?",
+            (window_start, window_end),
+        ).fetchall()
+        for row in rows:
+            f = dict(row)
+            airline = f.get("airline") or "your airline"
+            route = f"{f.get('departure_airport')}->{f.get('destination_airport')}"
+            conf = f.get("confirmation_number") or ""
+            message = (
+                f"Check-in likely opens now for {airline} {route}"
+                + (f" ({conf})" if conf and conf != "-" else "")
+                + ". Most airlines open check-in 24h before departure — do it in the airline's app."
+            )
+            try:
+                send_notification("Check-in reminder", message, f.get("owner_user_id"))
+            except Exception as err:
+                logger.error("Check-in reminder failed: %s", err)
+                continue
+            conn.execute("UPDATE flights SET checkin_reminder_sent = 1 WHERE id = ?", (f["id"],))
+            conn.commit()
+    except Exception as e:
+        logger.error("Check-in reminder check failed: %s", e)
 
 
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
@@ -1577,6 +1618,9 @@ def main_loop() -> None:
 
             # Day-of-travel flight status (schedule changes / cancellations)
             check_day_of_travel_status(conn)
+
+            # Check-in reminders for non-Southwest flights (we can't auto-check them in)
+            check_other_airline_checkin_reminders(conn)
 
             # Attempt seat upgrades for A-List accounts (48h before departure)
             attempt_seat_upgrades(conn)

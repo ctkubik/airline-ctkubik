@@ -30,8 +30,8 @@ export function GET(_req: NextRequest, { params }: { params: { token: string } }
   const flights = db
     .prepare(
       `SELECT f.id, f.flight_number, f.departure_airport, f.destination_airport,
-              f.departure_time, f.checkin_status, r.confirmation_number,
-              r.first_name, r.last_name
+              f.departure_time, f.checkin_status, f.airline, f.auto_checkin,
+              r.confirmation_number, r.first_name, r.last_name
        FROM flights f
        JOIN reservations r ON r.id = f.reservation_id
        WHERE r.owner_user_id = ?
@@ -44,6 +44,8 @@ export function GET(_req: NextRequest, { params }: { params: { token: string } }
     destination_airport: string;
     departure_time: string;
     checkin_status: string;
+    airline: string | null;
+    auto_checkin: number | null;
     confirmation_number: string;
     first_name: string;
     last_name: string;
@@ -65,8 +67,12 @@ export function GET(_req: NextRequest, { params }: { params: { token: string } }
     if (isNaN(dep.getTime())) continue;
     const checkin = new Date(dep.getTime() - 24 * 3600 * 1000);
     const route = `${f.departure_airport} → ${f.destination_airport}`;
-    const wn = f.flight_number ? ` (${String(f.flight_number).replace(/^WN/, "WN ")})` : "";
+    const flightLabel = f.airline
+      ? `${f.airline} ${f.flight_number}`
+      : String(f.flight_number || "").replace(/^WN/, "WN ");
+    const wn = flightLabel ? ` (${flightLabel})` : "";
     const pax = `${f.first_name} ${f.last_name}`.trim();
+    const autoCheckin = f.auto_checkin !== 0;
 
     // Flight event (2h block)
     lines.push(
@@ -90,7 +96,11 @@ export function GET(_req: NextRequest, { params }: { params: { token: string } }
         `DTSTART:${toICSDate(checkin)}`,
         `DTEND:${toICSDate(new Date(checkin.getTime() + 30 * 60 * 1000))}`,
         `SUMMARY:${icsEscape("🎫 Check-in opens: " + route)}`,
-        `DESCRIPTION:${icsEscape(`Auto check-in for ${pax} (${f.confirmation_number}). The app handles this automatically.`)}`,
+        `DESCRIPTION:${icsEscape(
+          autoCheckin
+            ? `Auto check-in for ${pax} (${f.confirmation_number}). Concourse handles this automatically.`
+            : `Check-in opens for ${pax}${f.confirmation_number && f.confirmation_number !== "-" ? ` (${f.confirmation_number})` : ""}. Check in via the airline's app.`
+        )}`,
         "BEGIN:VALARM",
         "ACTION:DISPLAY",
         `DESCRIPTION:${icsEscape("Check-in for " + route)}`,

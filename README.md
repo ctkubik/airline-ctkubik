@@ -61,9 +61,14 @@
 - **Date windows**: Watch a whole departure/return window, not just one date
 - **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
 
+### Flights on any airline
+- **Add non-Southwest flights**: track a Delta, United, etc. flight for status, calendar, and a check-in reminder (Southwest flights are added automatically from your accounts; other airlines aren't auto-checked-in)
+- **Check-in reminders**: for non-Southwest flights, a notification ~24h before departure to check in via that airline's app
+
 ### Flight Status (day-of-travel)
-- **Schedule alerts**: within ~36h of departure, checks each flight against the airline schedule (via the same free Amadeus keys as fare watches) and alerts the owner on schedule changes or apparent cancellations
-- **Best-effort**: Amadeus coverage is strong for most carriers but can be spotty for Southwest; flights it can't resolve show "Check status" rather than a false alarm
+- **Real-time status**: within ~36h of departure, alerts the owner on delays, gate changes, and cancellations
+- **Two providers**: [AeroDataBox](https://rapidapi.com/aedbx-aedbx/api/aerodatabox) (free tier via RapidAPI, best coverage incl. Southwest) when `AERODATABOX_API_KEY` is set, otherwise falls back to the Amadeus schedule API
+- **Best-effort**: flights that can't be resolved show "Check status" rather than a false alarm
 
 ### Travel Credits
 - **Auto-synced from Southwest**: Flight credits on monitored accounts are pulled in automatically on each account refresh (best-effort; manual entry always available)

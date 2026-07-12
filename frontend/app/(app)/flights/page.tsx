@@ -6,8 +6,29 @@ import { StatusBadge } from "@/components/flights/status-badge";
 import { CountdownTimer } from "@/components/flights/countdown-timer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Camera } from "lucide-react";
 import type { WorkerLog } from "@/lib/types";
+
+// Common US carriers for the manual "Add Flight" form (2-letter IATA codes).
+const AIRLINES: { code: string; name: string }[] = [
+  { code: "AA", name: "American" },
+  { code: "AS", name: "Alaska" },
+  { code: "B6", name: "JetBlue" },
+  { code: "DL", name: "Delta" },
+  { code: "F9", name: "Frontier" },
+  { code: "G4", name: "Allegiant" },
+  { code: "HA", name: "Hawaiian" },
+  { code: "NK", name: "Spirit" },
+  { code: "SY", name: "Sun Country" },
+  { code: "UA", name: "United" },
+  { code: "WN", name: "Southwest" },
+  { code: "AC", name: "Air Canada" },
+  { code: "WS", name: "WestJet" },
+  { code: "BA", name: "British Airways" },
+  { code: "LH", name: "Lufthansa" },
+  { code: "AF", name: "Air France" },
+];
 
 interface CaptureEntry {
   id: number;
@@ -50,6 +71,8 @@ interface FlightWithFare {
   assigned_seat?: string;
   flight_status?: string | null;
   flight_status_detail?: string | null;
+  airline?: string | null;
+  auto_checkin?: number;
   confirmation_number: string;
   first_name: string;
   last_name: string;
@@ -110,6 +133,44 @@ export default function FlightsPage() {
   const [editingFare, setEditingFare] = useState<string | null>(null);
   const [fareInput, setFareInput] = useState("");
   const [loggedCredits, setLoggedCredits] = useState<Set<string>>(new Set());
+  const [showAdd, setShowAdd] = useState(false);
+  const [addError, setAddError] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addForm, setAddForm] = useState({
+    airline: "",
+    flight_number: "",
+    departure_date: "",
+    departure_time: "",
+    departure_airport: "",
+    destination_airport: "",
+    passenger_first: "",
+    passenger_last: "",
+    confirmation_number: "",
+  });
+
+  async function handleAddFlight(e: React.FormEvent) {
+    e.preventDefault();
+    setAddError("");
+    setAdding(true);
+    const res = await fetch("/api/flights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(addForm),
+    });
+    if (res.ok) {
+      setAddForm({
+        airline: "", flight_number: "", departure_date: "", departure_time: "",
+        departure_airport: "", destination_airport: "", passenger_first: "",
+        passenger_last: "", confirmation_number: "",
+      });
+      setShowAdd(false);
+      fetchFlights();
+    } else {
+      const body = await res.json().catch(() => null);
+      setAddError(body?.error || "Could not add flight");
+    }
+    setAdding(false);
+  }
 
   async function logCapturedCredit(flightId: string, confirmation: string, amount: number) {
     const res = await fetch("/api/credits", {
@@ -199,10 +260,118 @@ export default function FlightsPage() {
           <div className="eyebrow mb-1">Travel</div>
           <h1 className="text-[28px] font-semibold tracking-tight">Flights</h1>
         </div>
-        <p className="font-mono text-[13px] text-[color:var(--muted)]">
-          {flights.length} tracked
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="font-mono text-[13px] text-[color:var(--muted)]">{flights.length} tracked</p>
+          <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
+            + Add Flight
+          </Button>
+        </div>
       </header>
+
+      {showAdd && (
+        <Card>
+          <CardContent className="pt-5">
+            <div className="mb-3">
+              <div className="font-display text-[15px] font-semibold">Add a flight (any airline)</div>
+              <p className="text-[13px] text-[color:var(--muted)]">
+                Track a non-Southwest flight for status, calendar, and a check-in reminder. Southwest
+                flights are added automatically from your accounts.
+              </p>
+            </div>
+            {addError && (
+              <div className="mb-3 rounded-[var(--radius-sm)] bg-[color:var(--danger-tint)] p-2 text-sm text-[color:var(--danger)]">
+                {addError}
+              </div>
+            )}
+            <form onSubmit={handleAddFlight} className="grid gap-3 md:grid-cols-4">
+              <div>
+                <label className="eyebrow mb-1 block">Airline</label>
+                <select
+                  value={addForm.airline}
+                  onChange={(e) => setAddForm({ ...addForm, airline: e.target.value })}
+                  className="h-10 w-full rounded-[var(--radius-sm)] border border-[color:var(--line-strong)] bg-[color:var(--surface)] px-3 text-sm"
+                  required
+                >
+                  <option value="">Pick airline…</option>
+                  {AIRLINES.map((a) => (
+                    <option key={a.code} value={a.code}>
+                      {a.name} ({a.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="eyebrow mb-1 block">Flight #</label>
+                <Input
+                  placeholder="2345"
+                  value={addForm.flight_number}
+                  onChange={(e) => setAddForm({ ...addForm, flight_number: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="eyebrow mb-1 block">Date</label>
+                <Input
+                  type="date"
+                  value={addForm.departure_date}
+                  onChange={(e) => setAddForm({ ...addForm, departure_date: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="eyebrow mb-1 block">Time (local)</label>
+                <Input
+                  type="time"
+                  value={addForm.departure_time}
+                  onChange={(e) => setAddForm({ ...addForm, departure_time: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="eyebrow mb-1 block">From</label>
+                <Input
+                  placeholder="MKE"
+                  maxLength={3}
+                  value={addForm.departure_airport}
+                  onChange={(e) => setAddForm({ ...addForm, departure_airport: e.target.value.toUpperCase() })}
+                />
+              </div>
+              <div>
+                <label className="eyebrow mb-1 block">To</label>
+                <Input
+                  placeholder="DEN"
+                  maxLength={3}
+                  value={addForm.destination_airport}
+                  onChange={(e) => setAddForm({ ...addForm, destination_airport: e.target.value.toUpperCase() })}
+                />
+              </div>
+              <div>
+                <label className="eyebrow mb-1 block">Passenger</label>
+                <Input
+                  placeholder="First name"
+                  value={addForm.passenger_first}
+                  onChange={(e) => setAddForm({ ...addForm, passenger_first: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="eyebrow mb-1 block">Confirmation (optional)</label>
+                <Input
+                  placeholder="ABC123"
+                  value={addForm.confirmation_number}
+                  onChange={(e) => setAddForm({ ...addForm, confirmation_number: e.target.value.toUpperCase() })}
+                />
+              </div>
+              <div className="flex gap-2 md:col-span-4">
+                <Button type="submit" disabled={adding}>
+                  {adding ? "Adding…" : "Add Flight"}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       {flights.length === 0 ? (
         <Card>
@@ -252,7 +421,9 @@ export default function FlightsPage() {
                         </span>
                         {flight.flight_number && (
                           <span className="font-mono text-xs text-[color:var(--faint)]">
-                            {String(flight.flight_number).replace(/^WN/, "WN ")}
+                            {flight.airline
+                              ? `${flight.airline} ${flight.flight_number}`
+                              : String(flight.flight_number).replace(/^WN/, "WN ")}
                           </span>
                         )}
                       </div>
@@ -319,26 +490,43 @@ export default function FlightsPage() {
                         </>
                       )}
                     </div>
-                    <div className="w-24 text-right">
-                      <CountdownTimer departureTime={flight.departure_time} status={flight.checkin_status} />
-                    </div>
-                    <StatusBadge status={flight.checkin_status} />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await fetch("/api/flights/check-seats", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ flight_id: flight.id }),
-                        });
-                        alert("Seat check queued! Check Activity in ~60 seconds.");
-                      }}
-                    >
-                      Check Seats
-                    </Button>
+                    {flight.auto_checkin === 0 ? (
+                      // Non-Southwest: tracked only (no auto check-in / seat tools)
+                      <>
+                        <div className="w-24 text-right font-mono text-[13px] text-[color:var(--muted)]">
+                          {new Date(flight.departure_time).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </div>
+                        <Badge variant="default" title="Tracked for status & calendar; no auto check-in">
+                          Tracked
+                        </Badge>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-24 text-right">
+                          <CountdownTimer departureTime={flight.departure_time} status={flight.checkin_status} />
+                        </div>
+                        <StatusBadge status={flight.checkin_status} />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await fetch("/api/flights/check-seats", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ flight_id: flight.id }),
+                            });
+                            alert("Seat check queued! Check Activity in ~60 seconds.");
+                          }}
+                        >
+                          Check Seats
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
 

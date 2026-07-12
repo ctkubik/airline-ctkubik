@@ -1,13 +1,13 @@
-"""Day-of-travel flight status checks via the Amadeus flight-schedule API.
+"""Day-of-travel flight status checks.
 
-Best-effort and browser-free. Reuses the same free Amadeus keys as fare
-watches. For each upcoming flight (within ~36h of departure) it looks up the
-airline's published schedule and detects schedule changes / apparent
-cancellations, notifying the flight's owner on a material change.
+Two providers, selected automatically:
+  1. AeroDataBox (primary when AERODATABOX_API_KEY is set) — real-time status
+     with delays, gate/terminal, and cancellations; strong Southwest coverage.
+  2. Amadeus flight-schedule (fallback, reuses the fare-watch keys) — schedule
+     changes / apparent cancellations only.
 
-Coverage note: Amadeus schedule data is strong for most carriers but can be
-spotty for Southwest specifically; when a flight can't be resolved the status
-is recorded as 'unknown' rather than alarming the user.
+Both are browser-free and best-effort. When a flight can't be resolved the
+status is recorded as 'unknown' rather than alarming the user.
 """
 
 from __future__ import annotations
@@ -17,12 +17,13 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
+import requests
+
 from .fare_watch import AmadeusClient, FareWatchApiError
 from .log import get_logger
 
 logger = get_logger(__name__)
 
-# How far a schedule shift must be (minutes) before we treat it as a change.
 SIGNIFICANT_SHIFT_MIN = 15
 
 
@@ -36,53 +37,130 @@ def parse_carrier_flight(flight_number: str) -> tuple[str | None, str | None]:
     return carrier, m.group(2)
 
 
+def _parse_time(value: str | None) -> datetime | None:
+    """Parse the varied ISO-ish timestamps both providers return."""
+    if not value:
+        return None
+    v = value.strip().replace(" ", "T")
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+# ── AeroDataBox (RapidAPI) ───────────────────────────────────────────────
+
+class AeroDataBoxClient:
+    def __init__(self) -> None:
+        self.key = os.environ.get("AERODATABOX_API_KEY", "")
+        self.host = os.environ.get("AERODATABOX_HOST", "aerodatabox.p.rapidapi.com")
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.key)
+
+    def get_flight(self, ident: str, date: str) -> list[dict]:
+        url = f"https://{self.host}/flights/number/{ident}/{date}"
+        resp = requests.get(
+            url,
+            params={"withAircraftImage": "false", "withLocation": "false"},
+            headers={"x-rapidapi-key": self.key, "x-rapidapi-host": self.host},
+            timeout=30,
+        )
+        if resp.status_code == 204:
+            return []
+        if resp.status_code >= 400:
+            raise FareWatchApiError(resp.status_code, resp.text[:300])
+        data = resp.json()
+        if isinstance(data, dict):
+            # Some responses wrap the list or return an error object.
+            return data.get("flights") or []
+        return data or []
+
+
+def _aerodatabox_status(client: AeroDataBoxClient, carrier: str, number: str, dep_date: str, flight: dict) -> tuple[str, str]:
+    data = client.get_flight(f"{carrier}{number}", dep_date)
+    if not data:
+        return "unavailable", "Not found in live flight data (possibly cancelled or changed)"
+
+    dep_ap = flight.get("departure_airport")
+    leg = next(
+        (f for f in data if (f.get("departure") or {}).get("airport", {}).get("iata") == dep_ap),
+        data[0],
+    )
+    st = (leg.get("status") or "").lower()
+    dep = leg.get("departure") or {}
+    gate = dep.get("gate")
+    terminal = dep.get("terminal")
+    loc_bits = []
+    if terminal:
+        loc_bits.append(f"Terminal {terminal}")
+    if gate:
+        loc_bits.append(f"Gate {gate}")
+    loc = (" · " + ", ".join(loc_bits)) if loc_bits else ""
+
+    if "cancel" in st:
+        return "cancelled", "Flight cancelled" + loc
+    if "divert" in st:
+        return "delayed", "Diverted" + loc
+
+    sched = _parse_time((dep.get("scheduledTime") or {}).get("utc"))
+    revised = _parse_time(
+        (dep.get("revisedTime") or {}).get("utc") or (dep.get("runwayTime") or {}).get("utc")
+    )
+    delay_min = 0
+    if sched and revised:
+        delay_min = (revised.timestamp() - sched.timestamp()) / 60.0
+
+    if "delay" in st or delay_min >= SIGNIFICANT_SHIFT_MIN:
+        when = ""
+        if revised:
+            local = (dep.get("revisedTime") or {}).get("local") or revised.isoformat()
+            when = f", now {str(local)[:16]}"
+        mins = f" ~{int(delay_min)} min" if delay_min >= 1 else ""
+        return "delayed", f"Delayed{mins}{when}{loc}"
+
+    return "scheduled", ("On time" + loc)
+
+
+# ── Amadeus schedule (fallback) ──────────────────────────────────────────
+
 def _scheduled_departure(resp: dict, departure_airport: str) -> str | None:
-    """Pull the scheduled departure timestamp from an Amadeus schedule response."""
     data = resp.get("data") or []
     for flight in data:
         points = flight.get("flightPoints") or []
-        # Prefer the point matching our departure airport; else the first with a departure.
         candidates = [p for p in points if p.get("iataCode") == departure_airport] or points
         for p in candidates:
-            dep = p.get("departure") or {}
-            timings = dep.get("timings") or []
+            timings = (p.get("departure") or {}).get("timings") or []
             for t in timings:
-                val = t.get("value")
-                if val:
-                    return val  # ISO 8601 with offset, e.g. 2026-07-17T08:05:00-05:00
+                if t.get("value"):
+                    return t["value"]
     return None
 
 
-def _classify(resp: dict, flight: dict) -> tuple[str, str]:
-    """Return (status, human detail) for a flight given the schedule response."""
+def _amadeus_status(resp: dict, flight: dict) -> tuple[str, str]:
     data = resp.get("data") or []
     if not data:
-        # The airline schedule no longer lists this flight for the date.
         return "unavailable", "Not found in the airline schedule (possibly cancelled or changed)"
-
-    sched = _scheduled_departure(resp, flight.get("departure_airport", ""))
+    sched = _parse_time(_scheduled_departure(resp, flight.get("departure_airport", "")))
     if not sched:
         return "scheduled", "On schedule"
-
-    try:
-        sched_dt = datetime.fromisoformat(sched)
-    except ValueError:
+    stored = _parse_time(flight.get("departure_time"))
+    if not stored:
         return "scheduled", "On schedule"
-
-    stored = flight.get("departure_time", "")
-    try:
-        stored_dt = datetime.fromisoformat(stored if not stored.endswith("Z") else stored[:-1] + "+00:00")
-    except ValueError:
-        return "scheduled", "On schedule"
-    if stored_dt.tzinfo is None:
-        stored_dt = stored_dt.replace(tzinfo=timezone.utc)
-
-    delta_min = abs(sched_dt.timestamp() - stored_dt.timestamp()) / 60.0
+    delta_min = abs(sched.timestamp() - stored.timestamp()) / 60.0
     if delta_min >= SIGNIFICANT_SHIFT_MIN:
-        local = sched_dt.strftime("%b %d %I:%M %p")
+        local = sched.strftime("%b %d %I:%M %p")
         return "schedule_changed", f"Departure now {local} (shifted ~{int(delta_min)} min)"
     return "scheduled", "On schedule"
 
+
+# ── Shared driver ────────────────────────────────────────────────────────
 
 def _update(conn, flight_id: str, status: str, detail: str) -> None:
     conn.execute(
@@ -93,11 +171,20 @@ def _update(conn, flight_id: str, status: str, detail: str) -> None:
     conn.commit()
 
 
+# States worth a push notification (once each).
+ACTIONABLE = ("delayed", "cancelled", "schedule_changed", "unavailable")
+
+
 def check_flight_statuses(conn, notify_fn=None) -> None:
     """Check status for flights within the travel window; notify on changes."""
-    client = AmadeusClient()
-    if not client.configured:
-        return  # feature shares Amadeus keys with fare watches; stay silent if unset
+    adb = AeroDataBoxClient()
+    amadeus = AmadeusClient()
+    if adb.configured:
+        provider = "aerodatabox"
+    elif amadeus.configured:
+        provider = "amadeus"
+    else:
+        return  # no status provider configured
 
     interval_min = float(os.environ.get("FLIGHT_STATUS_INTERVAL_MINUTES", "60"))
     now = datetime.utcnow()
@@ -118,20 +205,24 @@ def check_flight_statuses(conn, notify_fn=None) -> None:
         carrier, number = parse_carrier_flight(flight.get("flight_number"))
         if not number:
             continue
+        # Southwest flights store the carrier implicitly; a set airline wins.
+        if flight.get("airline"):
+            c2, _ = parse_carrier_flight(flight["airline"])
+            carrier = (flight["airline"][:3].upper() if len(flight["airline"]) <= 3 else carrier) or carrier
         dep_date = str(flight.get("departure_time", ""))[:10]
         if not dep_date:
             continue
+
         try:
-            resp = client.get(
-                "/v2/schedule/flights",
-                {
-                    "carrierCode": carrier,
-                    "flightNumber": number,
-                    "scheduledDepartureDate": dep_date,
-                },
-            )
+            if provider == "aerodatabox":
+                status, detail = _aerodatabox_status(adb, carrier, number, dep_date, flight)
+            else:
+                resp = amadeus.get(
+                    "/v2/schedule/flights",
+                    {"carrierCode": carrier, "flightNumber": number, "scheduledDepartureDate": dep_date},
+                )
+                status, detail = _amadeus_status(resp, flight)
         except FareWatchApiError as err:
-            # 400/404 usually means "not covered" — record softly, don't alarm.
             _update(conn, flight["id"], "unknown", f"Status unavailable ({err.status_code})")
             time.sleep(0.3)
             continue
@@ -139,19 +230,17 @@ def check_flight_statuses(conn, notify_fn=None) -> None:
             logger.warning("Flight status check failed for %s%s: %s", carrier, number, err)
             continue
 
-        status, detail = _classify(resp, flight)
         _update(conn, flight["id"], status, detail)
 
-        # Notify the owner once per distinct actionable state.
-        actionable = status in ("schedule_changed", "unavailable")
-        already = flight.get("flight_status_notified")
-        if notify_fn and actionable and already != status:
+        if notify_fn and status in ACTIONABLE and flight.get("flight_status_notified") != status:
             route = f"{flight.get('departure_airport')}->{flight.get('destination_airport')}"
-            title = (
-                "Flight schedule changed"
-                if status == "schedule_changed"
-                else "Flight status alert"
-            )
+            titles = {
+                "delayed": "Flight delayed",
+                "cancelled": "Flight cancelled",
+                "schedule_changed": "Flight schedule changed",
+                "unavailable": "Flight status alert",
+            }
+            title = titles.get(status, "Flight status alert")
             message = f"{route} ({flight.get('confirmation_number')}): {detail}"
             try:
                 notify_fn(title, message, flight.get("owner_user_id"))
@@ -163,4 +252,4 @@ def check_flight_statuses(conn, notify_fn=None) -> None:
             except Exception as err:  # noqa: BLE001
                 logger.error("Flight status notification failed: %s", err)
 
-        time.sleep(0.3)  # stay under the free-tier rate limit
+        time.sleep(0.3)  # stay under free-tier rate limits

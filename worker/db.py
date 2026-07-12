@@ -239,6 +239,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE flights ADD COLUMN flight_status_checked_at TEXT")
     if "flight_status_notified" not in flight_cols:
         conn.execute("ALTER TABLE flights ADD COLUMN flight_status_notified TEXT")
+    if "airline" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN airline TEXT")
+    if "auto_checkin" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN auto_checkin INTEGER DEFAULT 1")
+    if "checkin_reminder_sent" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN checkin_reminder_sent INTEGER DEFAULT 0")
+
+    res_cols2 = [row[1] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()]
+    if "is_southwest" not in res_cols2:
+        conn.execute("ALTER TABLE reservations ADD COLUMN is_southwest INTEGER DEFAULT 1")
 
     # Accounts table migrations
     account_cols = [row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()]
@@ -382,6 +392,7 @@ def get_pending_flights(conn: sqlite3.Connection) -> list[dict]:
         "FROM flights f JOIN reservations r ON r.id = f.reservation_id "
         "WHERE f.checkin_status IN ('pending', 'scheduled') "
         "AND f.departure_time > ? "
+        "AND (f.auto_checkin = 1 OR f.auto_checkin IS NULL) "
         "ORDER BY f.departure_time ASC",
         (now,),
     ).fetchall()
