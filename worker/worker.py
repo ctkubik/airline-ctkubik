@@ -687,7 +687,11 @@ def check_fares(conn: sqlite3.Connection) -> None:
                     try:
                         from notifications import notify_fare_drop
                         from db import get_flight_owner
-                        notify_msg = f"{price_str}{alt_info}"
+                        # A negative lowest fare means rebooking returns credit.
+                        capture = ""
+                        if lowest_fare["amount"] < -1:
+                            capture = f" — rebook to capture ${abs(lowest_fare['amount']):,} in travel credit"
+                        notify_msg = f"{price_str}{alt_info}{capture}"
                         owner = get_flight_owner(conn, flight_row["id"])
                         notify_fare_drop(flight_row["confirmation_number"], route, notify_msg, user_id=owner)
                     except Exception:

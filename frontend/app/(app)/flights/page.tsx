@@ -86,6 +86,25 @@ export default function FlightsPage() {
   const [expandError, setExpandError] = useState<string | null>(null);
   const [editingFare, setEditingFare] = useState<string | null>(null);
   const [fareInput, setFareInput] = useState("");
+  const [loggedCredits, setLoggedCredits] = useState<Set<string>>(new Set());
+
+  async function logCapturedCredit(flightId: string, confirmation: string, amount: number) {
+    const res = await fetch("/api/credits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmation_number: confirmation,
+        amount,
+        notes: "Captured from a fare drop (rebooked)",
+      }),
+    });
+    if (res.ok) {
+      setLoggedCredits((s) => new Set(s).add(flightId));
+    } else {
+      const body = await res.json().catch(() => null);
+      alert(body?.error || "Could not log the credit. Add it manually on the Credits page.");
+    }
+  }
 
   async function saveOriginalFare(flightId: string) {
     await fetch("/api/flights/update", {
@@ -180,6 +199,12 @@ export default function FlightsPage() {
               lf?.my_flight_fare != null &&
               lf.price_change < lf.my_flight_fare;
             const savings = altIsCheaper ? lf!.my_flight_fare! - lf!.price_change : 0;
+            // Southwest's change flow returns a negative price difference as travel
+            // credit — rebooking your own fare captures that amount.
+            const captureCredit =
+              lf && typeof lf.price_change === "number" && lf.price_change < -1
+                ? Math.abs(lf.price_change)
+                : 0;
 
             return (
             <Card key={flight.id} className="ticket-hover overflow-hidden">
@@ -315,6 +340,48 @@ export default function FlightsPage() {
                         <span className="text-sm font-medium text-green-700">
                           Save ${savings.toLocaleString()}
                         </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Capture travel credit: rebooking your own fare returns money */}
+                {captureCredit > 0 && (
+                  <div
+                    className="mt-3 rounded-[var(--radius-sm)] p-3"
+                    style={{ background: "var(--success-tint)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--success)" }}>
+                          Capture travel credit
+                        </div>
+                        <div className="text-sm text-[color:var(--ink-soft)]">
+                          Your fare dropped — rebooking this flight on Southwest may return{" "}
+                          <b className="font-mono" style={{ color: "var(--success)" }}>
+                            ${captureCredit.toLocaleString()}
+                          </b>{" "}
+                          as travel credit.
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href="https://www.southwest.com/air/manage-reservation/"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <Button variant="outline" size="sm">
+                            How to rebook →
+                          </Button>
+                        </a>
+                        <Button
+                          size="sm"
+                          disabled={loggedCredits.has(flight.id)}
+                          onClick={() => logCapturedCredit(flight.id, flight.confirmation_number, captureCredit)}
+                        >
+                          {loggedCredits.has(flight.id) ? "Logged ✓" : `Log $${captureCredit} credit`}
+                        </Button>
                       </div>
                     </div>
                   </div>
