@@ -152,12 +152,15 @@ export default function FlightsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Flights</h1>
-        <p className="text-sm text-gray-500">
-          {flights.length} flight{flights.length !== 1 ? "s" : ""} tracked
+      <header className="flex items-end justify-between">
+        <div>
+          <div className="eyebrow mb-1">Travel</div>
+          <h1 className="text-[28px] font-semibold tracking-tight">Flights</h1>
+        </div>
+        <p className="font-mono text-[13px] text-[color:var(--muted)]">
+          {flights.length} tracked
         </p>
-      </div>
+      </header>
 
       {flights.length === 0 ? (
         <Card>
@@ -179,44 +182,48 @@ export default function FlightsPage() {
             const savings = altIsCheaper ? lf!.my_flight_fare! - lf!.price_change : 0;
 
             return (
-            <Card key={flight.id} className="overflow-hidden">
+            <Card key={flight.id} className="ticket-hover overflow-hidden">
               <div
-                className="p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                className="relative cursor-pointer p-4 pl-5 transition-colors hover:bg-[color:var(--surface-2)]"
                 onClick={() => expandFlight(flight.id)}
               >
+                {/* Boarding-stub edge */}
+                <span className="absolute inset-y-3 left-0 w-1 rounded-full bg-[color:var(--accent)]" aria-hidden />
                 {/* Row 1: Flight info */}
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div className="flex flex-wrap items-center gap-2 md:gap-4">
+                  <div className="flex flex-wrap items-center gap-3 md:gap-5">
+                    <div className="flex items-center gap-2.5 font-mono text-[18px] font-semibold tracking-tight">
+                      <span>{flight.departure_airport}</span>
+                      <span className="text-[color:var(--accent)]">&rarr;</span>
+                      <span>{flight.destination_airport}</span>
+                    </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm font-medium">
+                      <div className="flex items-center gap-2 text-[13px]">
+                        <span className="font-mono font-medium text-[color:var(--ink)]">
                           {flight.confirmation_number}
                         </span>
                         {flight.flight_number && (
-                          <span className="text-xs text-gray-400">WN {flight.flight_number}</span>
+                          <span className="font-mono text-xs text-[color:var(--faint)]">
+                            {String(flight.flight_number).replace(/^WN/, "WN ")}
+                          </span>
                         )}
                       </div>
-                      <div className="text-sm text-gray-600 mt-0.5">
+                      <div className="mt-0.5 text-[13px] text-[color:var(--muted)]">
                         {flight.first_name} {flight.last_name}
                         {flight.assigned_seat && (
-                          <span className="ml-2 text-xs font-medium text-blue-600">
+                          <span className="ml-2 rounded bg-[color:var(--accent-tint)] px-1.5 py-0.5 text-[11px] font-semibold text-[color:var(--accent-hover)]">
                             Seat {flight.assigned_seat}
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className="text-sm">
-                      <span className="font-medium">{flight.departure_airport}</span>
-                      {" "}&rarr;{" "}
-                      <span className="font-medium">{flight.destination_airport}</span>
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      <div>
+                    <div className="text-[13px]">
+                      <div className="font-medium text-[color:var(--ink-soft)]">
                         {new Date(flight.departure_time).toLocaleDateString(undefined, {
                           weekday: "short", month: "short", day: "numeric",
                         })}
                       </div>
-                      <div className="text-xs text-gray-400">
+                      <div className="font-mono text-xs text-[color:var(--faint)]">
                         {new Date(flight.departure_time).toLocaleTimeString(undefined, {
                           hour: "2-digit", minute: "2-digit",
                         })}

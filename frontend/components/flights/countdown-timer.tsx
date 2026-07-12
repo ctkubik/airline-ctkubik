@@ -28,8 +28,18 @@ export function CountdownTimer({ departureTime, status }: { departureTime: strin
     return () => clearInterval(interval);
   }, [departureTime, status]);
 
-  if (status === "success") return <span className="text-green-600 text-sm">Checked in</span>;
-  if (status === "failed") return <span className="text-red-600 text-sm">Failed</span>;
+  if (status === "success")
+    return <span className="text-sm font-medium text-[color:var(--success)]">Checked in</span>;
+  if (status === "failed")
+    return <span className="text-sm font-medium text-[color:var(--danger)]">Failed</span>;
 
-  return <span className="text-sm font-mono text-blue-600">{timeLeft}</span>;
+  const imminent = timeLeft === "Now" || (!timeLeft.includes("d") && !timeLeft.includes("h"));
+  return (
+    <span
+      className="font-mono text-[15px] font-semibold tabular"
+      style={{ color: imminent ? "var(--accent)" : "var(--ink)" }}
+    >
+      {timeLeft}
+    </span>
+  );
 }

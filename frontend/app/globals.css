@@ -1,3 +1,211 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+  "Departure" — a design system for a family air-travel dashboard.
+  Cool slate neutrals, a deep navy brand, one warm coral accent used sparingly,
+  a serif display face for titles, and monospace for flight data (the
+  departure-board motif: times, confirmation numbers, fares, countdowns).
+*/
+
+:root {
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+    Georgia, ui-serif, serif;
+
+  /* Light theme (default) */
+  --ground: #f4f6f8;
+  --ground-tint: #eef1f5;
+  --surface: #ffffff;
+  --surface-2: #f7f9fb;
+  --line: #e3e7ee;
+  --line-strong: #d2d8e2;
+
+  --ink: #14202e; /* near-black navy */
+  --ink-soft: #33404f;
+  --muted: #5f6b7d;
+  --faint: #8a94a4;
+
+  --brand: #17263f; /* deep navy — sidebar, headers */
+  --brand-tint: #e8ecf4;
+  --on-brand: #eaf0fb;
+  --on-brand-muted: #9fb0cc;
+
+  --accent: #e05a3c; /* warm coral — the single bold accent */
+  --accent-hover: #c8492e;
+  --accent-tint: #fceee9;
+  --accent-ring: rgba(224, 90, 60, 0.35);
+
+  --gold: #b07d24; /* warm secondary highlight */
+  --gold-tint: #f6ecd2;
+
+  --success: #1c7d4d;
+  --success-tint: #dcefe2;
+  --warning: #9a6a12;
+  --warning-tint: #f6eccf;
+  --danger: #bb3b2b;
+  --danger-tint: #f7ded8;
+  --info: #2f4c8c; /* calm indigo for "scheduled" */
+  --info-tint: #e2e8f7;
+
+  --shadow-sm: 0 1px 2px rgba(20, 32, 46, 0.06), 0 1px 3px rgba(20, 32, 46, 0.05);
+  --shadow-md: 0 4px 12px -4px rgba(20, 32, 46, 0.12), 0 2px 6px -3px rgba(20, 32, 46, 0.08);
+  --shadow-lg: 0 18px 42px -18px rgba(20, 32, 46, 0.28);
+
+  --radius: 12px;
+  --radius-sm: 9px;
+}
+
+:root[data-theme="dark"] {
+  --ground: #0e1521;
+  --ground-tint: #131b29;
+  --surface: #172131;
+  --surface-2: #1c2839;
+  --line: #26313f;
+  --line-strong: #33404f;
+
+  --ink: #e9ecf1;
+  --ink-soft: #c3ccd8;
+  --muted: #97a2b3;
+  --faint: #6b7789;
+
+  --brand: #0f1a2b;
+  --brand-tint: #1a2438;
+  --on-brand: #e7edf7;
+  --on-brand-muted: #8494ac;
+
+  --accent: #f0714f;
+  --accent-hover: #f4855f;
+  --accent-tint: #2a1c18;
+  --accent-ring: rgba(240, 113, 79, 0.4);
+
+  --gold: #d3a24c;
+  --gold-tint: #2a2314;
+
+  --success: #4cb37e;
+  --success-tint: #16281f;
+  --warning: #d2a24a;
+  --warning-tint: #29220f;
+  --danger: #e8705c;
+  --danger-tint: #2a1917;
+  --info: #7d9be0;
+  --info-tint: #172033;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 16px -6px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 20px 48px -18px rgba(0, 0, 0, 0.62);
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--ground);
+    color: var(--ink);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Serif display for real headings — used sparingly, carries the personality. */
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+
+  ::selection {
+    background: var(--accent-tint);
+    color: var(--accent-hover);
+  }
+
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border: 3px solid var(--ground);
+    border-radius: 9px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--faint);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+  .font-mono {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .surface {
+    background: var(--surface);
+  }
+  .hairline {
+    border-color: var(--line);
+  }
+}
+
+@layer components {
+  /* The boarding-pass "tear" — a perforated divider used on ticket cards. */
+  .perf {
+    position: relative;
+    border-top: 1.5px dashed var(--line-strong);
+  }
+  .perf::before,
+  .perf::after {
+    content: "";
+    position: absolute;
+    top: -9px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--ground);
+    border: 1px solid var(--line);
+  }
+  .perf::before {
+    left: -10px;
+  }
+  .perf::after {
+    right: -10px;
+  }
+
+  /* A ticket card: surface with soft elevation and an optional hover lift. */
+  .ticket {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+  }
+  .ticket-hover:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--line-strong);
+    transform: translateY(-1px);
+  }
+
+  /* Uppercase micro-label used above values, boarding-board style. */
+  .eyebrow {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+}
