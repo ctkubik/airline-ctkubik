@@ -231,6 +231,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE flights ADD COLUMN original_currency TEXT DEFAULT 'USD'")
     if "last_seat_upgrade_attempt" not in flight_cols:
         conn.execute("ALTER TABLE flights ADD COLUMN last_seat_upgrade_attempt TEXT")
+    if "flight_status" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN flight_status TEXT")
+    if "flight_status_detail" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN flight_status_detail TEXT")
+    if "flight_status_checked_at" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN flight_status_checked_at TEXT")
+    if "flight_status_notified" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN flight_status_notified TEXT")
 
     # Accounts table migrations
     account_cols = [row[1] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()]

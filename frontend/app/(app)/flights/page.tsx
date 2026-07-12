@@ -48,6 +48,8 @@ interface FlightWithFare {
   checkin_status: string;
   checkin_result: string | null;
   assigned_seat?: string;
+  flight_status?: string | null;
+  flight_status_detail?: string | null;
   confirmation_number: string;
   first_name: string;
   last_name: string;
@@ -55,6 +57,27 @@ interface FlightWithFare {
   original_currency?: string;
   latest_fare: FareInfo | null;
   baseline_fare: FareInfo | null;
+}
+
+function FlightStatusChip({ status, detail }: { status?: string | null; detail?: string | null }) {
+  if (!status || status === "scheduled" || status === "unknown") return null;
+  const styles: Record<string, { bg: string; fg: string; label: string }> = {
+    schedule_changed: { bg: "var(--warning-tint)", fg: "var(--warning)", label: "Schedule changed" },
+    delayed: { bg: "var(--warning-tint)", fg: "var(--warning)", label: "Delayed" },
+    cancelled: { bg: "var(--danger-tint)", fg: "var(--danger)", label: "Cancelled" },
+    unavailable: { bg: "var(--danger-tint)", fg: "var(--danger)", label: "Check status" },
+  };
+  const s = styles[status];
+  if (!s) return null;
+  return (
+    <span
+      title={detail || undefined}
+      className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold"
+      style={{ backgroundColor: s.bg, color: s.fg }}
+    >
+      {s.label}
+    </span>
+  );
 }
 
 function formatFare(fare: FareInfo | null): string {
@@ -240,6 +263,7 @@ export default function FlightsPage() {
                             Seat {flight.assigned_seat}
                           </span>
                         )}
+                        <FlightStatusChip status={flight.flight_status} detail={flight.flight_status_detail} />
                       </div>
                     </div>
                     <div className="text-[13px]">

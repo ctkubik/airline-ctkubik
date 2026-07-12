@@ -81,6 +81,10 @@ function initTables(db: Database.Database) {
       original_price INTEGER,
       original_currency TEXT DEFAULT 'USD',
       last_seat_upgrade_attempt TEXT,
+      flight_status TEXT,
+      flight_status_detail TEXT,
+      flight_status_checked_at TEXT,
+      flight_status_notified TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -287,4 +291,8 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("accounts", "last_login_error", "last_login_error TEXT");
   addColumnIfMissing("users", "totp_secret", "totp_secret TEXT");
   addColumnIfMissing("users", "totp_enabled", "totp_enabled INTEGER DEFAULT 0");
+  addColumnIfMissing("flights", "flight_status", "flight_status TEXT");
+  addColumnIfMissing("flights", "flight_status_detail", "flight_status_detail TEXT");
+  addColumnIfMissing("flights", "flight_status_checked_at", "flight_status_checked_at TEXT");
+  addColumnIfMissing("flights", "flight_status_notified", "flight_status_notified TEXT");
 }

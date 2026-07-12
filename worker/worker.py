@@ -1348,6 +1348,17 @@ def check_named_fare_watches(conn: sqlite3.Connection) -> None:
         add_log(conn, f"Fare watch check failed: {e}", "error")
 
 
+def check_day_of_travel_status(conn: sqlite3.Connection) -> None:
+    """Check upcoming flights' schedule status (Amadeus-based, browser-free)."""
+    try:
+        from lib.flight_status import check_flight_statuses
+        from notifications import send_notification
+
+        check_flight_statuses(conn, notify_fn=send_notification)
+    except Exception as e:
+        logger.error("Flight status check failed: %s", e)
+
+
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
     """Check for manual seat check requests and execute them."""
     # '_' is a single-character wildcard in LIKE — escape it so this matches
@@ -1563,6 +1574,9 @@ def main_loop() -> None:
 
             # Notify about travel documents (passports, PreCheck) nearing expiration
             check_document_expirations(conn)
+
+            # Day-of-travel flight status (schedule changes / cancellations)
+            check_day_of_travel_status(conn)
 
             # Attempt seat upgrades for A-List accounts (48h before departure)
             attempt_seat_upgrades(conn)

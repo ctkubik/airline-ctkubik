@@ -61,6 +61,10 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Date windows**: Watch a whole departure/return window, not just one date
 - **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
 
+### Flight Status (day-of-travel)
+- **Schedule alerts**: within ~36h of departure, checks each flight against the airline schedule (via the same free Amadeus keys as fare watches) and alerts the owner on schedule changes or apparent cancellations
+- **Best-effort**: Amadeus coverage is strong for most carriers but can be spotty for Southwest; flights it can't resolve show "Check status" rather than a false alarm
+
 ### Travel Credits
 - **Auto-synced from Southwest**: Flight credits on monitored accounts are pulled in automatically on each account refresh (best-effort; manual entry always available)
 - **Credits by person**: Confirmation number, amount, expiration date — attached to an account or a free-text name
