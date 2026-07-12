@@ -52,7 +52,7 @@ export function GET(_req: NextRequest, { params }: { params: { token: string } }
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//SW Check-In//Travel//EN",
+    "PRODID:-//Concourse//Travel//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${icsEscape((user.display_name || user.username) + " — Flights")}`,

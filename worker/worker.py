@@ -1401,8 +1401,8 @@ def process_test_notifications(conn: sqlite3.Connection) -> None:
             user_id = marker.replace("__TEST_NOTIFICATION_", "").rstrip("_") or None
         try:
             send_notification(
-                "SW Check-In Test",
-                "This is a test notification from your Southwest travel dashboard.",
+                "Concourse Test",
+                "This is a test notification from Concourse, your family travel dashboard.",
                 user_id=user_id,
             )
             add_log(conn, "Test notification sent successfully", "info")

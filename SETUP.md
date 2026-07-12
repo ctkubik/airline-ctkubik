@@ -131,7 +131,7 @@ docker compose logs app | head -30
 Look for the block:
 ```
 ==============================================================
- Auto Southwest Check-In
+ Concourse — family travel dashboard
 
  Web UI:   http://localhost:3000
  Username: admin
@@ -263,7 +263,7 @@ $10/year — Cloudflare itself sells them at cost, which is the easiest path).
    team name)
 2. **Networks → Tunnels → Create a tunnel**
 3. Choose **Cloudflared** as the connector type and name it (e.g.
-   `southwest-checkin`)
+   `concourse`)
 4. On the "Install and run a connector" screen, **don't run their command** —
    just copy the **token**: it's the long string of letters/numbers after
    `--token` in the command they show (starts with `eyJ`)

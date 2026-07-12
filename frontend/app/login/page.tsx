@@ -51,7 +51,7 @@ export default function LoginPage() {
             <span className="flex h-9 w-9 items-center justify-center rounded-[11px] bg-[color:var(--accent)] shadow-sm">
               <Plane className="h-5 w-5 -rotate-45 text-white" />
             </span>
-            <span className="font-display text-lg font-semibold tracking-tight">SW Check-In</span>
+            <span className="font-display text-lg font-semibold tracking-tight">Concourse</span>
           </div>
 
           <div className="max-w-md">

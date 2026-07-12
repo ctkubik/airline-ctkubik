@@ -17,8 +17,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "SW Check-In",
-  description: "Southwest Airlines Auto Check-In Monitor",
+  title: "Concourse",
+  description: "Concourse — your family's travel dashboard: check-ins, fares, credits, and documents.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

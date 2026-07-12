@@ -71,8 +71,8 @@ def notify_test() -> bool:
     """Send a test notification to all services. Returns True if sent."""
     try:
         send_notification(
-            "SW Check-In Test",
-            "This is a test notification from your Southwest Auto Check-In system.",
+            "Concourse Test",
+            "This is a test notification from Concourse, your family travel dashboard.",
         )
         return True
     except Exception:

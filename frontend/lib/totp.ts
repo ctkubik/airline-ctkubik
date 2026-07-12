@@ -60,7 +60,7 @@ export function verifyTotp(base32Secret: string, token: string): boolean {
 }
 
 /** otpauth:// provisioning URI for QR codes / manual entry in authenticator apps. */
-export function provisioningUri(base32Secret: string, account: string, issuer = "SW Check-In"): string {
+export function provisioningUri(base32Secret: string, account: string, issuer = "Concourse"): string {
   const label = encodeURIComponent(`${issuer}:${account}`);
   const params = new URLSearchParams({
     secret: base32Secret,

@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    container_name: southwest-checkin
+    container_name: concourse
     restart: unless-stopped
     init: true
     ports:
@@ -24,7 +24,7 @@ services:
   # 3. Start with:  docker compose --profile tunnel up -d
   tunnel:
     image: cloudflare/cloudflared:latest
-    container_name: southwest-checkin-tunnel
+    container_name: concourse-tunnel
     profiles: ["tunnel"]
     restart: unless-stopped
     command: tunnel --no-autoupdate run

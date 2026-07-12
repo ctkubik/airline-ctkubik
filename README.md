@@ -1,6 +1,6 @@
-## Auto-Southwest Check-In
+## Concourse
 
-A web application that automatically checks you in to your Southwest Airlines flights. Features a full web dashboard for managing accounts, monitoring flights, tracking fare changes, recording original booking prices, and configuring seat preferences. Includes a comprehensive check-in data capture system for learning Southwest's assigned seating API. Built on top of [jdholtz/auto-southwest-check-in](https://github.com/jdholtz/auto-southwest-check-in) with a complete web frontend and enhanced worker process.
+**Concourse** is a family travel hub. It automatically checks you in to your Southwest Airlines flights, watches fares across airlines, tracks travel credits and documents with expiration reminders, publishes your flights to a calendar, and gives every family member their own login — all from one dashboard you host yourself. Built on top of [jdholtz/auto-southwest-check-in](https://github.com/jdholtz/auto-southwest-check-in) with a complete web frontend and enhanced worker process. *(Formerly "SW Check-In".)*
 
 **Repository**: [github.com/ctkubik/airline-ctkubik](https://github.com/ctkubik/airline-ctkubik)
 

@@ -91,7 +91,7 @@ export function Sidebar() {
         </button>
         <div className="flex items-center gap-2">
           <PlaneMark />
-          <span className="font-display text-[15px] font-semibold">SW Check-In</span>
+          <span className="font-display text-[15px] font-semibold">Concourse</span>
         </div>
       </div>
 
@@ -110,9 +110,9 @@ export function Sidebar() {
           <Link href="/" className="flex items-center gap-2.5" onClick={() => setOpen(false)}>
             <PlaneMark />
             <div className="leading-none">
-              <div className="font-display text-[17px] font-semibold tracking-tight">SW Check-In</div>
+              <div className="font-display text-[17px] font-semibold tracking-tight">Concourse</div>
               <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--on-brand-muted)]">
-                auto boarding
+                family travel
               </div>
             </div>
           </Link>

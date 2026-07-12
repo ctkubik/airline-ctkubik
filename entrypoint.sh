@@ -41,7 +41,7 @@ AUTH_USERNAME="${AUTH_USERNAME:-admin}"
 export AUTH_USERNAME
 
 echo "=============================================================="
-echo " Auto Southwest Check-In"
+echo " Concourse — family travel dashboard"
 echo ""
 echo " Web UI:   http://localhost:3000"
 echo " Username: $AUTH_USERNAME"
