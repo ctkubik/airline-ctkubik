@@ -65,8 +65,16 @@
 - **Add non-Southwest flights**: track a Delta, United, etc. flight for status, calendar, and a check-in reminder (Southwest flights are added automatically from your accounts; other airlines aren't auto-checked-in)
 - **Check-in reminders**: for non-Southwest flights, a notification ~24h before departure to check in via that airline's app
 
+### Trips
+- **One journey, many airlines**: group the flights of a trip — Southwest out, Delta back — into a single timeline
+- **Running total**: sums each leg's fare so you see the whole trip's cost in one place
+- **Non-destructive**: attaching or removing a leg just re-tags the flight; deleting a trip leaves its flights tracked
+
 ### Flight Status (day-of-travel)
 - **Real-time status**: within ~36h of departure, alerts the owner on delays, gate changes, and cancellations
+- **Gate, terminal & aircraft**: the flight card surfaces departure gate/terminal, aircraft type, and (on arrival) the baggage-claim belt
+- **Arrival tracking**: a one-time "landed" alert when the flight arrives, plus in-air / landing-soon status on the card
+- **Airline-matched loyalty numbers**: each flight shows the passenger's frequent-flyer number for that carrier (from the encrypted Documents vault), masked until revealed
 - **Two providers**: [AeroDataBox](https://rapidapi.com/aedbx-aedbx/api/aerodatabox) (free tier via RapidAPI, best coverage incl. Southwest) when `AERODATABOX_API_KEY` is set, otherwise falls back to the Amadeus schedule API
 - **Best-effort**: flights that can't be resolved show "Check status" rather than a false alarm
 
@@ -80,7 +88,7 @@
 ### Calendar Feed & Documents
 - **Calendar subscription**: a private per-user .ics URL puts your flights and check-in times in Apple/Google/Outlook Calendar, always in sync
 - **Per-user notifications**: each family member routes alerts to their own phone/Telegram; shared services still fire for everyone
-- **Document vault**: passports, Global Entry, TSA PreCheck, and loyalty numbers with reminders 30 and 7 days before expiry; numbers encrypted at rest
+- **Document vault**: passports, Global Entry, TSA PreCheck, and loyalty numbers with reminders 30 and 7 days before expiry; numbers encrypted at rest. Tag a loyalty number with its airline and it shows up automatically on that carrier's flights.
 
 ### Multi-User Login, Roles & Security
 - **User accounts**: Admins create accounts for family members (member or admin role)
@@ -264,6 +272,8 @@ Track all reservations:
 ### Flights (`/flights`)
 Monitor all tracked flights with fare and capture data:
 - **Card layout**: Confirmation, passenger, route, departure date/time, fare change, seat, countdown, status
+- **Day-of details**: within ~36h of departure, the card shows gate/terminal, aircraft type, an arrival chip (in-air / landing soon / arrived), and the passenger's frequent-flyer number for that airline (masked; click the eye to reveal)
+- **Add Flight**: track a flight on any airline (see [Flights on any airline](#flights-on-any-airline))
 - **Original fare**: Click "$ Set fare" to record what you paid when booking
 - **Fare tracking**: Latest fare check result color-coded (green = lower fare, red = increase, gray = same)
 - **Click to expand**: Three sections:
@@ -271,6 +281,13 @@ Monitor all tracked flights with fare and capture data:
   - **Activity Log**: Worker logs specific to this flight
   - **Check-In Captures**: Screenshots, API responses, network logs, and DOM snapshots from check-in
 - Flights auto-refresh every 30 seconds
+
+### Trips (`/trips`)
+Group a journey's flights — across any mix of airlines — into one view:
+- **New Trip**: name it, optionally set destination and date window
+- **Attach legs**: pick from your tracked flights to build the trip's timeline
+- **Timeline & total**: legs render in departure order with a running total of what each leg cost
+- **Ownership**: members see only their own trips; admins see everyone's
 
 ### Activity (`/activity`)
 Three tabs for monitoring system behavior:
