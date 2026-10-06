@@ -3,18 +3,21 @@ import path from "path";
 import fs from "fs";
 
 // DATA_DIR is /app/data in Docker and the repo's ./data folder on a native
-// macOS install (set by macos/run.sh).
-const DATA_DIR = process.env.DATA_DIR || path.resolve("/app", "data");
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, "checkin.db");
-
-// Ensure data directory exists
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+// macOS install (set by macos/run.sh). Resolved when the database is first
+// opened, not at import: `next build` imports every route, and creating
+// /app/data there fails on macOS, where / is read-only.
+function dbPath(): string {
+  const dataDir = process.env.DATA_DIR || path.resolve("/app", "data");
+  return process.env.DB_PATH || path.join(dataDir, "checkin.db");
+}
 
 let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!_db) {
-    _db = new Database(DB_PATH);
+    const file = dbPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    _db = new Database(file);
     _db.pragma("journal_mode = WAL");
     // The Python worker writes to the same file; without a generous busy
     // timeout, its long transactions surface here as SQLITE_BUSY 500s.
