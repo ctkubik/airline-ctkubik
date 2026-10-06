@@ -58,15 +58,21 @@ Southwest account and notifications.
 
 ## How it runs
 
-Two background services, managed by macOS's built-in `launchd`:
+Three background services, managed by macOS's built-in `launchd`:
 
 | Service | What it does | Log file |
 |---------|--------------|----------|
 | `com.airline-checkin.web` | The dashboard at http://localhost:3000 | `data/logs/web.log` |
 | `com.airline-checkin.worker` | Logs in to Southwest, checks you in, tracks fares | `data/logs/worker.log` |
+| `com.airline-checkin.watchdog` | Every 5 minutes, alerts you if the worker stopped or froze | `data/logs/watchdog.log` |
 
-Everything the app stores (database, screenshots, logs) lives in the `data` folder inside the app
-folder. Settings live in `.env` in the same folder.
+Everything the app stores (database, screenshots, logs, nightly backups in `data/backups`) lives in
+the `data` folder inside the app folder. Settings live in `.env` in the same folder. Southwest
+passwords are stored encrypted; the key is in your login Keychain (item "airline-checkin").
+
+**If the whole Mac goes down**, nothing on it can warn you. For that, create a free check at
+[healthchecks.io](https://healthchecks.io) (period 5 minutes, grace 10 minutes), connect it to your
+phone, and add its ping URL to `.env` as `HEALTHCHECK_PING_URL=...`, then `./macos/ctl.sh restart`.
 
 The worker drives a real Google Chrome window. You'll see Chrome open on the Mac Mini's screen when
 it works. That's on purpose: Southwest blocks hidden ("headless") browsers more often. Leave that
@@ -145,10 +151,10 @@ For checking on things, run these in Terminal from the app folder (`cd ~/airline
 
 | Command | What it does |
 |---------|--------------|
-| `./macos/ctl.sh status` | Shows whether both services are running and the dashboard answers |
-| `./macos/ctl.sh logs` | Follows both log files (Ctrl+C to stop) |
+| `./macos/ctl.sh status` | Shows whether the services are running and the dashboard answers |
+| `./macos/ctl.sh logs` | Follows the log files (Ctrl+C to stop) |
 | `./macos/ctl.sh restart` | Restart after editing `.env` |
-| `./macos/ctl.sh stop` / `start` | Stop or start both services |
+| `./macos/ctl.sh stop` / `start` | Stop or start the services (stopping also pauses the watchdog, so it won't alert) |
 | `./macos/uninstall.sh` | Removes the background services (keeps your data and `.env`) |
 
 ## Updating

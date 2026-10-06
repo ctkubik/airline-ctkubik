@@ -40,6 +40,10 @@ A web application that automatically checks you in to your Southwest Airlines fl
 
 ### Core
 - **Automatic Check-In**: Checks in to flights exactly 24 hours before departure
+- **Missed-Check-In Safety Net**: In the 3 hours before each check-in the app confirms it will work (check-in queued, browser up, Southwest returns the reservation) and texts you if not; alerts at once if a check-in time passes without a check-in; a separate watchdog alerts if the worker dies; optional [healthchecks.io](https://healthchecks.io) ping for when the whole machine is down
+- **Savings Tracker**: Totals fare drops found and credit you claimed by rebooking, with claim steps on each drop
+- **Calendar Feed**: Private subscription link for Apple/Google/Outlook calendars with every flight and check-in time
+- **Encrypted Credentials and Backups**: Southwest passwords stored AES-256 encrypted (key in the macOS Keychain); nightly database backups kept 14 days
 - **Web Dashboard**: Monitor all flights, accounts, and check-in status from a browser
 - **Login Authentication**: Password-protected web interface with HMAC-signed auth cookies
 
@@ -81,6 +85,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Test Notifications**: One-click test button to verify notification delivery
 - **Check-in Notifications**: Alerts on successful or failed check-in attempts
 - **Fare Drop Notifications**: Alerts when a lower fare becomes available
+- **Per-Person Alerts**: Name each service ("Mom's phone"), send it only one traveler's trips or everyone's, and choose Everything / Important only / Problems only
 
 ### Check-In Learning System
 - **Screenshots**: Captures browser screenshots before and after every check-in
@@ -252,7 +257,8 @@ Manage your Southwest accounts:
 ### Reservations (`/reservations`)
 Track all reservations:
 - Reservations are **auto-discovered** when accounts are monitored
-- **Add manual reservations** by confirmation number + passenger name
+- **Add manual reservations** by confirmation number + passenger name, and choose whose trip it is (who gets its alerts)
+- **Add from email**: paste a Southwest confirmation email and the reservations are filled in for you to review (uses the local AI when on; otherwise finds the confirmation numbers)
 - **Route summaries** in collapsed view (e.g., "MKE -> PHX, PHX -> DEN")
 - **Expand** to see flights with routes, departure times, check-in countdowns, and status
 
@@ -338,6 +344,10 @@ python3 southwest.py --help
 | `DB_PATH` | Path to SQLite database file | `$DATA_DIR/checkin.db` |
 | `BROWSER_MODE` | `xvfb` (virtual display), `headed` (real Chrome window) or `headless` | `xvfb` in Docker, `headed` on macOS |
 | `PORT` / `BIND_ADDRESS` | Dashboard port and listen address (macOS native) | `3000` / `0.0.0.0` |
+| `CHECKIN_READINESS_HOURS` | Hours before each check-in to start confirming it will work | `3` |
+| `HEALTHCHECK_PING_URL` | Optional [healthchecks.io](https://healthchecks.io) ping URL; you're alerted if pings stop (machine down) | (unset) |
+| `SOUTHWEST_WATCH_INTERVAL_HOURS` | How often Southwest fare watches are checked | `6` |
+| `CREDENTIALS_KEY` | Password encryption key (64 hex); macOS keeps it in the Keychain, Docker in `data/.credentials-key` | (auto) |
 | `LLM_ENABLED` | Turn on the optional local AI features | (off) |
 | `LLM_BASE_URL` | OpenAI-compatible server (LM Studio) | `http://localhost:1234/v1` |
 | `LLM_MODEL` | Model id to use; blank = first loaded chat model | (blank) |
@@ -361,7 +371,10 @@ For **A-List members**: Enable "Auto Seat Upgrade" on your account to attempt up
 Notifications are sent for:
 - **Check-in success/failure**: Includes confirmation number, route, and passenger name
 - **Fare drops**: Only on NEW drops (won't repeat for same price); includes amount and route
+- **Safety net**: a check-in at risk (and when it's back on track), a missed check-in, or the app being down
 - **Test messages**: Via the "Send Test Notification" button in Settings
+
+Each service has a level (**Everything**, **Important only**, **Problems only**) and an audience (**everyone's trips** or **one traveler's**). A trip's traveler is the Southwest account it came from, or the person chosen for a manual reservation. Alerts that the app itself is down always go to every service.
 
 #### Notification Service Examples
 
