@@ -297,6 +297,32 @@ PORT="$(current PORT)"
 PORT="${PORT:-3000}"
 mkdir -p "$DATA_DIR/logs"
 
+# ── Password encryption key (Keychain) ──────────────────────────────────
+# Southwest passwords are stored encrypted (worker/lib/credentials.py). The
+# key lives in your login Keychain, not the data folder, so a copy of the
+# data folder alone doesn't reveal them. macos/run.sh hands it to the services.
+step "Password encryption key"
+KC_SERVICE="airline-checkin"
+KC_ACCOUNT="credentials-key"
+KEY_FILE="$DATA_DIR/.credentials-key"
+kc_key() { security find-generic-password -s "$KC_SERVICE" -a "$KC_ACCOUNT" -w 2>/dev/null || true; }
+if [ -f "$KEY_FILE" ] || [ -z "$(kc_key)" ]; then
+    # A key file is the one this data was encrypted with (e.g. moved over
+    # from Docker), so it wins; otherwise start a new key.
+    new_key="$( [ -f "$KEY_FILE" ] && tr -d '[:space:]' < "$KEY_FILE" || true)"
+    [ -n "$new_key" ] || new_key="$(random_hex 32)"
+    if security add-generic-password -U -s "$KC_SERVICE" -a "$KC_ACCOUNT" -w "$new_key" \
+            -T /usr/bin/security >/dev/null 2>&1 && [ "$(kc_key)" = "$new_key" ]; then
+        rm -f "$KEY_FILE"
+        echo "Key stored in your login Keychain."
+    else
+        warn "Couldn't use the Keychain; the key is kept in $KEY_FILE instead."
+        if [ ! -f "$KEY_FILE" ]; then (umask 077 && printf '%s' "$new_key" > "$KEY_FILE"); fi
+    fi
+else
+    echo "Key is in your login Keychain."
+fi
+
 # ── 4. Background services (launchd) ─────────────────────────────────────
 step "Installing background services"
 AGENTS_DIR="$HOME/Library/LaunchAgents"

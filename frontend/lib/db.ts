@@ -244,6 +244,8 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("flights", "readiness_failures", "readiness_failures INTEGER DEFAULT 0");
   addColumnIfMissing("flights", "readiness_alerted", "readiness_alerted INTEGER DEFAULT 0");
   addColumnIfMissing("flights", "missed_alerted", "missed_alerted INTEGER DEFAULT 0");
+  addColumnIfMissing("flights", "rebooked_savings", "rebooked_savings REAL");
+  addColumnIfMissing("flights", "rebooked_at", "rebooked_at TEXT");
 
   addColumnIfMissing("notification_configs", "label", "label TEXT DEFAULT ''");
   addColumnIfMissing("notification_configs", "account_ids", "account_ids TEXT");

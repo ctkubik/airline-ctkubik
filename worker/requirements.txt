@@ -1,4 +1,7 @@
 apprise==1.9.4
+# Encrypts stored Southwest passwords (worker/lib/credentials.py). No wheel for
+# 32-bit ARM, where passwords stay unencrypted.
+cryptography>=44; platform_machine != "armv7l"
 ntplib==0.4.0
 requests==2.32.3
 seleniumbase==4.34.12

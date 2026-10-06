@@ -54,7 +54,13 @@ export async function middleware(request: NextRequest) {
 
   // Allow login page and auth API without authentication.
   // /api/health is exempt so Docker healthchecks work without a cookie.
-  if (pathname === "/login" || pathname === "/api/auth" || pathname === "/api/health") {
+  // /api/calendar/feed checks its own secret token (calendar apps can't log in).
+  if (
+    pathname === "/login" ||
+    pathname === "/api/auth" ||
+    pathname === "/api/health" ||
+    pathname === "/api/calendar/feed"
+  ) {
     return NextResponse.next();
   }
 

@@ -35,10 +35,12 @@ from db import (
     log_diagnostic,
     get_notification_configs,
     cleanup_old_data,
+    backup_database,
     get_stale_capture_dirs,
     recover_stuck_checkins,
 )
 from lib.config import CAPTURES_DIR
+from lib.credentials import CredentialKeyError, encrypt_stored_passwords
 from lib.log import get_logger
 from lib.utils import (
     CheckFaresOption,
@@ -310,9 +312,16 @@ def process_accounts(conn: sqlite3.Connection) -> None:
         add_log(conn, f"Processing account: {account['username']}", "info")
 
         try:
+            from lib.credentials import decrypt
+
             sw_reservations, first_name, last_name = browser_session.login_and_get_reservations(
-                account["username"], account["password"]
+                account["username"], decrypt(account["password"])
             )
+        except CredentialKeyError as e:
+            # Not a wrong password: don't count it toward deactivating the account
+            logger.error("Can't read the password for %s: %s", account["username"], e)
+            add_log(conn, f"Can't log in to {account['username']}: {e}", "error")
+            continue
         except DriverTimeoutError:
             logger.warning("Timeout logging into account %s", account["username"])
             add_log(conn, f"Timeout logging into account {account['username']}", "warning")
@@ -1456,6 +1465,15 @@ def run_daily_cleanup(conn: sqlite3.Connection) -> None:
     logger.info("Running daily data cleanup")
     add_log(conn, "Running daily data cleanup", "info")
 
+    # Nightly database backup (data/backups, last 14 days)
+    try:
+        path = backup_database(conn)
+        if path:
+            add_log(conn, f"Database backed up to {path}", "info")
+    except Exception as e:
+        logger.error("Database backup failed: %s", e)
+        add_log(conn, f"Database backup failed: {e}", "error")
+
     counts = cleanup_old_data(conn)
     total = sum(counts.values())
     if total > 0:
@@ -1592,6 +1610,7 @@ def main_loop() -> None:
             # hiccup, a fare-check error) must not skip the others, above all
             # scheduling check-ins and the safety net.
             for name, step in (
+                ("password encryption", lambda: encrypt_stored_passwords(conn)),
                 ("browser session", browser_session.ensure_alive),
                 ("accounts", lambda: process_accounts(conn)),
                 ("manual reservations", lambda: process_manual_reservations(conn)),

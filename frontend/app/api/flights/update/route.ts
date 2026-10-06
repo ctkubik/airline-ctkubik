@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { flight_id, original_price, original_currency } = body;
+  const { flight_id, original_price, original_currency, rebooked_savings } = body;
 
   if (!flight_id) {
     return NextResponse.json({ error: "flight_id required" }, { status: 400 });
@@ -20,6 +20,16 @@ export async function POST(req: NextRequest) {
   if (original_currency !== undefined) {
     fields.push("original_currency = ?");
     values.push(original_currency || "USD");
+  }
+
+  // Savings tracker: the traveler rebooked to claim a fare drop (null = undo)
+  if (rebooked_savings !== undefined) {
+    const amount = rebooked_savings === null || rebooked_savings === "" ? null : Number(rebooked_savings);
+    if (amount !== null && (!Number.isFinite(amount) || amount <= 0 || amount > 10000)) {
+      return NextResponse.json({ error: "Enter the amount you got back" }, { status: 400 });
+    }
+    fields.push("rebooked_savings = ?", "rebooked_at = ?");
+    values.push(amount, amount === null ? null : new Date().toISOString());
   }
 
   if (fields.length === 0) {

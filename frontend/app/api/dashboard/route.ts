@@ -43,7 +43,26 @@ export function GET() {
   else if (aliveAge > 5) workerProblem = `The check-in worker stopped ${Math.round(aliveAge)} minutes ago.`;
   else if (loopAge !== null && loopAge > 45) workerProblem = `The check-in worker has been stuck for ${Math.round(loopAge)} minutes.`;
 
+  // Savings tracker: the biggest drop found on each flight (USD), and what
+  // travelers marked as claimed by rebooking
+  const found = db
+    .prepare(
+      `SELECT COUNT(*) AS flights, COALESCE(SUM(-biggest_drop), 0) AS amount FROM (
+         SELECT MIN(price_change) AS biggest_drop FROM fare_history
+         WHERE currency_code = 'USD' AND price_change < -1 GROUP BY flight_id)`
+    )
+    .get() as { flights: number; amount: number };
+  const claimed = db
+    .prepare("SELECT COUNT(*) AS flights, COALESCE(SUM(rebooked_savings), 0) AS amount FROM flights WHERE rebooked_savings > 0")
+    .get() as { flights: number; amount: number };
+
   return NextResponse.json({
+    savings: {
+      drops_found: found.amount,
+      flights_with_drops: found.flights,
+      claimed: claimed.amount,
+      flights_claimed: claimed.flights,
+    },
     system: {
       worker_alive_minutes_ago: aliveAge,
       worker_loop_minutes_ago: loopAge,

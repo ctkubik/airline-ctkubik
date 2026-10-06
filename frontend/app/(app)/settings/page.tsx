@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Trash2, Plus, Save, MessageSquare, Sparkles, RefreshCw } from "lucide-react";
+import { Trash2, Plus, Save, MessageSquare, Sparkles, RefreshCw, CalendarDays } from "lucide-react";
 import type { NotificationConfig } from "@/lib/types";
 
 const ALL_SEAT_LETTERS = ["A", "B", "C", "D", "E", "F"];
@@ -72,10 +72,22 @@ export default function SettingsPage() {
   } | null>(null);
   const [llmChecking, setLlmChecking] = useState(false);
 
+  // Calendar feed subscription link
+  const [calendarToken, setCalendarToken] = useState<string | null>(null);
+  const [calendarCopied, setCalendarCopied] = useState(false);
+  const calendarUrl =
+    calendarToken && typeof window !== "undefined"
+      ? `${window.location.origin}/api/calendar/feed?token=${calendarToken}`
+      : "";
+
   useEffect(() => {
     fetchNotifications();
     fetchPreferences();
     fetchLlmStatus();
+    fetch("/api/calendar/link")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCalendarToken(d?.token ?? null))
+      .catch(() => setCalendarToken(null));
     fetch("/api/accounts")
       .then((r) => (r.ok ? r.json() : []))
       .then(setAccounts)
@@ -527,6 +539,60 @@ export default function SettingsPage() {
                 )}
               </div>
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Calendar feed */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CalendarDays className="h-5 w-5" /> Calendar
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-gray-600">
+            Subscribe to this private link in Apple Calendar, Google Calendar or Outlook to see every upcoming
+            flight and when its check-in opens, with the seat added after check-in. It updates every hour. The
+            device needs to reach this app (same Wi-Fi, Tailscale, or your public URL).
+          </p>
+          {calendarUrl ? (
+            <>
+              <code className="block break-all rounded bg-gray-50 px-2 py-1 text-xs text-gray-700">{calendarUrl}</code>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => (window.location.href = calendarUrl.replace(/^https?:/, "webcal:"))}>
+                  Add to Calendar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(calendarUrl);
+                    setCalendarCopied(true);
+                    setTimeout(() => setCalendarCopied(false), 2000);
+                  }}
+                >
+                  {calendarCopied ? "Copied" : "Copy link"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    if (!window.confirm("Make a new link? Calendars using the old link will stop updating.")) return;
+                    const r = await fetch("/api/calendar/link", { method: "POST" });
+                    const d = await r.json();
+                    setCalendarToken(d.token);
+                  }}
+                >
+                  New link
+                </Button>
+              </div>
+              <p className="text-xs text-gray-400">
+                Anyone with this link can see your flights. Use New link to cut off an old one.
+              </p>
+            </>
+          ) : (
+            <p className="text-gray-500">Loading...</p>
           )}
         </CardContent>
       </Card>

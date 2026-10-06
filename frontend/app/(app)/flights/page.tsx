@@ -52,6 +52,7 @@ interface FlightWithFare {
   first_name: string;
   last_name: string;
   original_price?: number | null;
+  rebooked_savings?: number | null;
   original_currency?: string;
   latest_fare: FareInfo | null;
   baseline_fare: FareInfo | null;
@@ -95,6 +96,34 @@ export default function FlightsPage() {
     });
     setEditingFare(null);
     setFareInput("");
+    fetchFlights();
+  }
+
+  // Savings tracker: record what the traveler got back by rebooking
+  async function markRebooked(flightId: string, suggested: number) {
+    const answer = window.prompt(
+      "How much did you get back (travel credit or refund), in dollars?",
+      suggested > 0 ? String(suggested) : ""
+    );
+    if (answer === null) return;
+    const res = await fetch("/api/flights/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ flight_id: flightId, rebooked_savings: answer.replace(/[$,\s]/g, "") }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      window.alert(body?.error || "Couldn't save that amount");
+    }
+    fetchFlights();
+  }
+
+  async function undoRebooked(flightId: string) {
+    await fetch("/api/flights/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ flight_id: flightId, rebooked_savings: null }),
+    });
     fetchFlights();
   }
 
@@ -313,6 +342,47 @@ export default function FlightsPage() {
                   </div>
                 )}
               </div>
+
+              {/* Savings tracker: how to claim a fare drop, and record it once done */}
+              {lf && lf.currency_code === "USD" && lf.price_change < -1 && !flight.rebooked_savings && (
+                <div className="mx-4 mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-900">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <strong>Claim this ${Math.abs(lf.price_change).toLocaleString()} drop:</strong> in the
+                      Southwest app open Trips, pick this trip, tap Change flight, choose the same flight and
+                      confirm. Southwest gives back the difference (as travel credit on most fares). Then mark
+                      it here so your savings add up.
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        markRebooked(flight.id, Math.abs(lf.price_change));
+                      }}
+                    >
+                      I rebooked
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {flight.rebooked_savings ? (
+                <div className="mx-4 mb-4 flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  <span>
+                    Saved <strong>${flight.rebooked_savings.toLocaleString()}</strong> by rebooking
+                  </span>
+                  <button
+                    className="text-xs text-gray-400 underline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      undoRebooked(flight.id);
+                    }}
+                  >
+                    Undo
+                  </button>
+                </div>
+              ) : null}
 
               {/* Expanded detail */}
               {selectedFlight === flight.id && (

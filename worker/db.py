@@ -232,6 +232,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("readiness_failures", "readiness_failures INTEGER DEFAULT 0"),
         ("readiness_alerted", "readiness_alerted INTEGER DEFAULT 0"),
         ("missed_alerted", "missed_alerted INTEGER DEFAULT 0"),
+        # Savings tracker: what the traveler says they got back by rebooking
+        ("rebooked_savings", "rebooked_savings REAL"),
+        ("rebooked_at", "rebooked_at TEXT"),
     ):
         if col not in flight_cols:
             conn.execute(f"ALTER TABLE flights ADD COLUMN {ddl}")
@@ -619,3 +622,37 @@ def get_stale_capture_dirs(conn: sqlite3.Connection) -> list[str]:
            AND sua.capture_dir IS NOT NULL"""
     ).fetchall()
     return [r["capture_dir"] for r in rows if r["capture_dir"]]
+
+
+# ── Backups ──────────────────────────────────────────────────────────────
+
+BACKUP_KEEP_DAYS = 14
+
+
+def backup_database(conn: sqlite3.Connection, backup_dir: str | None = None) -> str | None:
+    """Write today's backup (data/backups/checkin-YYYY-MM-DD.db) if it doesn't exist.
+
+    Uses SQLite's online backup, so it's consistent while the app keeps
+    running. Keeps the last BACKUP_KEEP_DAYS backups. Returns the new
+    file's path, or None if today's backup already existed.
+    """
+    backup_dir = backup_dir or os.path.join(os.path.dirname(DB_PATH), "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    target = os.path.join(backup_dir, f"checkin-{datetime.utcnow().date().isoformat()}.db")
+    if os.path.exists(target):
+        return None
+    partial = target + ".partial"
+    dest = sqlite3.connect(partial)
+    try:
+        conn.backup(dest)
+    finally:
+        dest.close()
+    os.replace(partial, target)
+    os.chmod(target, 0o600)
+    backups = sorted(f for f in os.listdir(backup_dir) if f.startswith("checkin-") and f.endswith(".db"))
+    for old in backups[:-BACKUP_KEEP_DAYS]:
+        try:
+            os.remove(os.path.join(backup_dir, old))
+        except OSError:
+            pass
+    return target

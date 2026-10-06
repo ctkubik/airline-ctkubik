@@ -12,6 +12,12 @@ export default function DashboardPage() {
   const [upcomingFlights, setUpcomingFlights] = useState<Flight[]>([]);
   const [recentLogs, setRecentLogs] = useState<WorkerLog[]>([]);
   const [systemProblem, setSystemProblem] = useState<string | null>(null);
+  const [savings, setSavings] = useState<{
+    drops_found: number;
+    flights_with_drops: number;
+    claimed: number;
+    flights_claimed: number;
+  } | null>(null);
 
   useEffect(() => {
     fetchDashboard();
@@ -39,6 +45,7 @@ export default function DashboardPage() {
     setUpcomingFlights(data.upcoming_flights);
     setRecentLogs(data.recent_logs);
     setSystemProblem(data.system?.problem ?? null);
+    setSavings(data.savings ?? null);
   }
 
   return (
@@ -63,6 +70,32 @@ export default function DashboardPage() {
         <StatCard icon={CheckCircle} label="Successful" value={stats?.successful_checkins ?? 0} color="green" />
         <StatCard icon={XCircle} label="Failed" value={stats?.failed_checkins ?? 0} color="red" />
       </div>
+
+      {savings && (savings.drops_found > 0 || savings.claimed > 0) && (
+        <Card>
+          <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:gap-10">
+            <div>
+              <div className="text-2xl font-bold text-green-700">${Math.round(savings.claimed).toLocaleString()}</div>
+              <div className="text-xs text-gray-500">
+                saved by rebooking ({savings.flights_claimed} flight{savings.flights_claimed === 1 ? "" : "s"})
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-gray-900">
+                ${Math.round(savings.drops_found).toLocaleString()}
+              </div>
+              <div className="text-xs text-gray-500">
+                in fare drops found ({savings.flights_with_drops} flight{savings.flights_with_drops === 1 ? "" : "s"})
+              </div>
+            </div>
+            {savings.drops_found > savings.claimed && (
+              <p className="text-sm text-gray-600 md:ml-auto md:max-w-sm">
+                Unclaimed drops are on the Flights page with steps to claim them.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

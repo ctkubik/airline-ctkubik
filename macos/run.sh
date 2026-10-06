@@ -20,6 +20,12 @@ if [ -f .env ]; then
 fi
 
 export DATA_DIR="${DATA_DIR:-$REPO/data}"
+
+# Password encryption key from the login Keychain (stored by install.sh)
+if [ -z "${CREDENTIALS_KEY:-}" ]; then
+    CREDENTIALS_KEY="$(security find-generic-password -s airline-checkin -a credentials-key -w 2>/dev/null || true)"
+    [ -n "$CREDENTIALS_KEY" ] && export CREDENTIALS_KEY
+fi
 export DB_PATH="${DB_PATH:-$DATA_DIR/checkin.db}"
 mkdir -p "$DATA_DIR/logs"
 
