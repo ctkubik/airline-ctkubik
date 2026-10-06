@@ -91,23 +91,40 @@ if [ -x "$PYTHON" ]; then
 else
     # Relocatable builds from the python-build-standalone project (the same
     # builds uv and other tools install), checked against their SHA256SUMS.
-    release_json="$(curl -fsSL https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest)" \
-        || die "couldn't reach GitHub to download Python"
-    py_url="$(printf '%s' "$release_json" \
-        | grep -oE "https://[^\"]*/cpython-3\.13\.[0-9]+(%2B|\+)[0-9]+-$PY_TRIPLE-install_only\.tar\.gz" | head -1 || true)"
-    sums_url="$(printf '%s' "$release_json" | grep -oE 'https://[^"]*/SHA256SUMS' | head -1 || true)"
-    [ -n "$py_url" ] || die "couldn't find a Python 3.13 download for this Mac"
-    py_file="$(basename "$py_url" | sed 's/%2B/+/g')"
-    download "$py_url" "$TMP/$py_file"
-    # Checksums: the release's SHA256SUMS file, or (older releases) a
-    # .sha256 file next to each download.
-    if [ -n "$sums_url" ]; then
-        download "$sums_url" "$TMP/SHA256SUMS"
+    # Plain download links first: they aren't subject to the GitHub API's
+    # 60-requests-an-hour limit for anonymous users.
+    pbs="https://github.com/astral-sh/python-build-standalone/releases"
+    py_tag="$(curl -fsSI "$pbs/latest" | awk 'tolower($1) == "location:" {print $2}' \
+        | tr -d '\r' | sed -n 's#.*/releases/tag/##p' || true)"
+    py_file=""
+    expected=""
+    if [ -n "$py_tag" ] && curl -fsSL -o "$TMP/SHA256SUMS" "$pbs/download/$py_tag/SHA256SUMS"; then
+        py_file="$(awk '{print $2}' "$TMP/SHA256SUMS" \
+            | grep -E "^cpython-3\.13\.[0-9]+\+[0-9]+-$PY_TRIPLE-install_only\.tar\.gz$" | head -1 || true)"
         expected="$(awk -v f="$py_file" '$2 == f {print $1}' "$TMP/SHA256SUMS")"
-    else
-        download "$py_url.sha256" "$TMP/py.sha256"
-        expected="$(awk '{print $1}' "$TMP/py.sha256")"
+        py_url="$pbs/download/$py_tag/${py_file//+/%2B}"
     fi
+    if [ -z "$py_file" ]; then
+        # Fallback: the GitHub API's release listing (uses GITHUB_TOKEN if set)
+        auth=()
+        [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+        # ${auth[@]+...}: macOS's bash 3.2 treats an empty array as unset under set -u
+        release_json="$(curl -fsSL ${auth[@]+"${auth[@]}"} https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest)" \
+            || die "couldn't reach GitHub to download Python. Wait a few minutes and try again."
+        py_url="$(printf '%s' "$release_json" \
+            | grep -oE "https://[^\"]*/cpython-3\.13\.[0-9]+(%2B|\+)[0-9]+-$PY_TRIPLE-install_only\.tar\.gz" | head -1 || true)"
+        [ -n "$py_url" ] || die "couldn't find a Python 3.13 download for this Mac"
+        py_file="$(basename "$py_url" | sed 's/%2B/+/g')"
+        sums_url="$(printf '%s' "$release_json" | grep -oE 'https://[^"]*/SHA256SUMS' | head -1 || true)"
+        if [ -n "$sums_url" ]; then
+            download "$sums_url" "$TMP/SHA256SUMS"
+            expected="$(awk -v f="$py_file" '$2 == f {print $1}' "$TMP/SHA256SUMS")"
+        else
+            download "$py_url.sha256" "$TMP/py.sha256"
+            expected="$(awk '{print $1}' "$TMP/py.sha256")"
+        fi
+    fi
+    download "$py_url" "$TMP/$py_file"
     [ -n "$expected" ] || die "no checksum published for $py_file"
     echo "$expected  $TMP/$py_file" | shasum -a 256 -c - >/dev/null || die "Python download failed its checksum"
     rm -rf "$RUNTIME/python"

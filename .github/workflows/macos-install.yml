@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 30
     env:
       AIRLINE_NONINTERACTIVE: "1"
+      # Only used if the installer falls back to the GitHub API (rate limits)
+      GITHUB_TOKEN: ${{ github.token }}
       AIRLINE_HOME: ${{ github.workspace }}/../airline-install
     steps:
       - name: Checkout
