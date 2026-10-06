@@ -127,7 +127,8 @@ class BrowserSession:
         headed = BROWSER_MODE in ("xvfb", "headed")
         logger.info("Browser mode: %s", BROWSER_MODE)
         self._driver = Driver(
-            binary_location=None,
+            # CHROME_PATH: set by the macOS installer when Chrome lives in ~/Applications
+            binary_location=os.environ.get("CHROME_PATH") or None,
             driver_version=driver_version,
             headed=headed,
             headless1=not headed,

@@ -35,7 +35,8 @@ rotate_log() {
 rotate_log "${1:-}"
 
 find_node() {
-    for candidate in /opt/homebrew/opt/node@22/bin/node /usr/local/opt/node@22/bin/node; do
+    # The installer's private copy first; Homebrew paths for older installs.
+    for candidate in "$REPO/runtime/node/bin/node" /opt/homebrew/opt/node@22/bin/node /usr/local/opt/node@22/bin/node; do
         [ -x "$candidate" ] && { echo "$candidate"; return; }
     done
     command -v node

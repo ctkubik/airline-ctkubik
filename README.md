@@ -135,16 +135,17 @@ The web app runs as a single Docker container with two processes managed by supe
 
 ### Mac Mini / macOS (native)
 
-Runs directly on macOS with no Docker. Recommended for a Mac Mini. Full beginner walkthrough: **[MACOS.md](MACOS.md)**.
+One double-click, no Docker, Homebrew or Terminal needed. Full walkthrough: **[MACOS.md](MACOS.md)**.
 
+1. **Code > Download ZIP** on GitHub and open the ZIP
+2. Double-click **Install on Mac.command** (the first time, macOS asks you to allow it in **System Settings > Privacy & Security > Open Anyway**)
+
+Or paste one line into Terminal, which skips that warning:
 ```shell
-cd ~
-git clone https://github.com/ctkubik/airline-ctkubik.git
-cd airline-ctkubik
-./macos/install.sh
+curl -fsSL https://raw.githubusercontent.com/ctkubik/airline-ctkubik/master/macos/bootstrap.sh | bash
 ```
 
-The installer sets up Python, Node and Chrome with Homebrew, builds the dashboard, generates your login, and registers two `launchd` services that start at login and restart on crashes. The worker runs under `caffeinate` so the Mac can't sleep through a check-in. Use `./macos/ctl.sh status|logs|restart` afterwards, and re-run the installer after `git pull` to update.
+The installer copies the app to `~/airline-ctkubik`, downloads private copies of Python and Node (and Chrome if missing), builds the dashboard, generates your login, registers two `launchd` services that start at login and restart on crashes, and adds **Airline Check-In** to Applications. The worker runs under `caffeinate` so the Mac can't sleep through a check-in. Run it again to update.
 
 ### Quick Start (Docker)
 
@@ -420,7 +421,7 @@ This enables progressive adaptation to Southwest's API changes without requiring
 
 ## Local AI (optional)
 
-The app can use a model running on your own machine in [LM Studio](https://lmstudio.ai) (or any OpenAI-compatible server such as Ollama or llama.cpp). Nothing leaves the machine and there's no per-use cost. Setup steps are in [MACOS.md](MACOS.md#step-5-optional-local-ai-with-lm-studio); the short version is `LLM_ENABLED=true` in `.env` with LM Studio's server running.
+The app can use a model running on your own machine in [LM Studio](https://lmstudio.ai) (or any OpenAI-compatible server such as Ollama or llama.cpp). Nothing leaves the machine and there's no per-use cost. Setup steps are in [MACOS.md](MACOS.md#local-ai-with-lm-studio-optional); on a Mac the installer turns it on automatically when LM Studio is installed; elsewhere set `LLM_ENABLED=true` in `.env`.
 
 | Feature | Where | What the model does |
 |---------|-------|---------------------|

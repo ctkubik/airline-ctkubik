@@ -7,17 +7,53 @@ and keeps the Mac awake so a 3 a.m. check-in never gets missed.
 Works on Apple Silicon (M1 to M4) and Intel Macs running macOS 13 Ventura or newer.
 
 ## Table of Contents
+- [Install (one double-click)](#install-one-double-click)
 - [How it runs](#how-it-runs)
-- [Step 1: Install Homebrew](#step-1-install-homebrew)
-- [Step 2: Download the app](#step-2-download-the-app)
-- [Step 3: Run the installer](#step-3-run-the-installer)
-- [Step 4: Make the Mac start up on its own](#step-4-make-the-mac-start-up-on-its-own)
-- [Step 5 (optional): Local AI with LM Studio](#step-5-optional-local-ai-with-lm-studio)
-- [Step 6 (optional): Reach it from your phone](#step-6-optional-reach-it-from-your-phone)
+- [Make the Mac start up on its own](#make-the-mac-start-up-on-its-own)
+- [Local AI with LM Studio (optional)](#local-ai-with-lm-studio-optional)
+- [Reach it from your phone (optional)](#reach-it-from-your-phone-optional)
 - [Everyday commands](#everyday-commands)
 - [Updating](#updating)
 - [Moving over from Docker](#moving-over-from-docker)
 - [Troubleshooting](#troubleshooting)
+
+## Install (one double-click)
+
+1. On the [GitHub page](https://github.com/ctkubik/airline-ctkubik), click **Code > Download ZIP**,
+   then open the downloaded ZIP so it unzips.
+2. In the unzipped folder, double-click **Install on Mac.command**.
+
+That's it. A Terminal window shows the progress (5 to 10 minutes the first time), and when it's done
+the dashboard opens in your browser with your login details.
+
+**The first time only**, macOS blocks files downloaded from the internet that aren't from the App
+Store or a registered developer. You'll see *"Install on Mac.command" Not Opened*. Click **Done**,
+open **System Settings > Privacy & Security**, scroll down, click **Open Anyway** next to the
+message about "Install on Mac.command", and confirm. (On macOS 14 and older you can instead
+Control-click the file and choose **Open**.) If macOS asks whether Terminal may access your
+Downloads folder, click **Allow**.
+
+Prefer no warnings at all? Open **Terminal** and paste this one line instead. It downloads the latest
+version and runs the same installer:
+```shell
+curl -fsSL https://raw.githubusercontent.com/ctkubik/airline-ctkubik/master/macos/bootstrap.sh | bash
+```
+
+You don't need Homebrew, git, or admin rights. The installer:
+1. Copies the app to `~/airline-ctkubik` (your home folder)
+2. Downloads private copies of Python 3.13 and Node 22 into the app folder (checksums verified),
+   and Google Chrome if you don't have it (signature verified)
+3. Builds the dashboard and creates your login with a random password
+4. Turns on the local AI features if LM Studio is installed
+5. Starts the two background services and adds **Airline Check-In** to your Applications folder,
+   which opens the dashboard
+6. Asks for your Mac password once, in a normal macOS dialog, to stop the Mac from sleeping and to
+   turn it back on after a power cut (you can click Cancel)
+7. Offers to open the automatic-login setting (see below), then shows your username and password
+   with a **Copy Password** button and opens the dashboard
+
+Then follow [Part 4 of the setup guide](SETUP.md#part-4-first-time-setup-in-the-app) to add your
+Southwest account and notifications.
 
 ## How it runs
 
@@ -35,57 +71,7 @@ The worker drives a real Google Chrome window. You'll see Chrome open on the Mac
 it works. That's on purpose: Southwest blocks hidden ("headless") browsers more often. Leave that
 window alone.
 
-## Step 1: Install Homebrew
-
-Homebrew is the standard installer for developer tools on a Mac. Open **Terminal** (Applications >
-Utilities > Terminal) and paste the command from [brew.sh](https://brew.sh). Follow its prompts, and
-run the two "Next steps" commands it prints at the end.
-
-Check it worked:
-```shell
-brew --version
-```
-
-## Step 2: Download the app
-
-Put the app in your home folder. **Not** in Documents, Desktop, Downloads or iCloud Drive: macOS
-blocks background services from reading those folders.
-
-```shell
-cd ~
-git clone https://github.com/ctkubik/airline-ctkubik.git
-cd airline-ctkubik
-```
-
-(If macOS asks to install the "command line developer tools" for `git`, click Install, then run
-the command again.)
-
-## Step 3: Run the installer
-
-```shell
-./macos/install.sh
-```
-
-It takes a few minutes the first time. It:
-1. Installs Python 3.13, Node 22 and Google Chrome (skips anything you already have)
-2. Sets up the worker and builds the dashboard
-3. Creates `.env` with a random login password
-4. Starts both background services
-5. Offers to change power settings so the Mac never sleeps and turns back on after a power cut.
-   Say **y** and enter your Mac password.
-
-At the end it prints your login:
-```
-All set.
-  Dashboard:  http://localhost:3000
-  Username:   admin
-  Password:   3f9c1a7b2e4d6f80   (saved in .env)
-```
-
-Open http://localhost:3000, log in, and follow [Part 4 of the setup guide](SETUP.md#part-4-first-time-setup-in-the-app)
-to add your Southwest account and notifications.
-
-## Step 4: Make the Mac start up on its own
+## Make the Mac start up on its own
 
 The services run inside your user session, so after a restart (a macOS update, a power cut) the Mac
 has to log you in without anyone at the keyboard:
@@ -106,7 +92,7 @@ sudo pmset -a sleep 0 disksleep 0 autorestart 1 womp 1
 
 Test it: restart the Mac, wait two minutes, and run `./macos/ctl.sh status`.
 
-## Step 5 (optional): Local AI with LM Studio
+## Local AI with LM Studio (optional)
 
 If [LM Studio](https://lmstudio.ai) runs on the Mac, the app can use its model for three things:
 
@@ -127,19 +113,17 @@ Set it up:
 3. In LM Studio's **Developer** tab, start the server (port 1234). In LM Studio's settings, turn on
    running the server when LM Studio starts, and add LM Studio to **System Settings > General >
    Login Items** so it comes back after a restart.
-4. In the app folder, edit `.env` and add:
-   ```
-   LLM_ENABLED=true
-   LLM_MODEL=qwen/qwen3-8b
-   ```
-   Use the model identifier LM Studio shows for your model. Leave `LLM_MODEL` out to use whichever
-   model is loaded.
-5. Restart: `./macos/ctl.sh restart`
-6. In the dashboard, **Settings > Local AI** should say **Connected**.
+4. Run the installer again (double-click **Install on Mac.command**). It sees LM Studio and turns the
+   features on. If you installed LM Studio first, this already happened.
+5. In the dashboard, **Settings > Local AI** should say **Connected**.
+
+By default the app uses the first chat model LM Studio has. To pin one, add
+`LLM_MODEL=<model identifier from LM Studio>` to `.env` in `~/airline-ctkubik`, then run
+`./macos/ctl.sh restart`.
 
 If LM Studio is closed or the model is slow, the app carries on without it.
 
-## Step 6 (optional): Reach it from your phone
+## Reach it from your phone (optional)
 
 - **Same Wi-Fi:** http://your-mac-name.local:3000 (the installer prints the exact address)
 - **Anywhere, private:** install [Tailscale](https://tailscale.com) on the Mac and your phone, then
@@ -147,7 +131,7 @@ If LM Studio is closed or the model is slow, the app carries on without it.
 - **Public URL:** Cloudflare Tunnel. Create a tunnel as in [SETUP.md](SETUP.md#option-b-cloudflare-tunnel--a-real-public-url-httpsflightsyournamecom)
   but point the public hostname at `http://localhost:3000`, then on the Mac:
   ```shell
-  brew install cloudflared
+  brew install cloudflared   # needs Homebrew from https://brew.sh
   sudo cloudflared service install <your-tunnel-token>
   ```
 
@@ -155,7 +139,8 @@ Create real user accounts on the **Users** page before exposing a public URL.
 
 ## Everyday commands
 
-Run these from the app folder (`cd ~/airline-ctkubik`):
+Day to day you don't need any of these: open **Airline Check-In** from your Applications folder.
+For checking on things, run these in Terminal from the app folder (`cd ~/airline-ctkubik`):
 
 | Command | What it does |
 |---------|--------------|
@@ -167,19 +152,16 @@ Run these from the app folder (`cd ~/airline-ctkubik`):
 
 ## Updating
 
-```shell
-cd ~/airline-ctkubik
-git pull
-./macos/install.sh
-```
-
-The installer is safe to re-run. It rebuilds and restarts, and keeps your data and settings.
+Run the installer again: download a fresh ZIP and double-click **Install on Mac.command**, or paste
+the one-line Terminal command from [Install](#install-one-double-click). It rebuilds and restarts,
+and keeps your data, settings and login.
 
 ## Moving over from Docker
 
 1. Stop the container: `docker compose down`
-2. Your data is already in `./data` (the same folder Docker used), and your `.env` is reused.
-3. Run `./macos/install.sh`.
+2. Copy your Docker folder's `data` folder and `.env` file into `~/airline-ctkubik` (create the
+   folder if needed).
+3. Double-click **Install on Mac.command**. It keeps the copied data and login.
 
 Docker Desktop can stay installed but doesn't need to run.
 
@@ -198,7 +180,7 @@ haven't set `BROWSER_MODE=headless`. Open the Activity page, and with local AI o
 update Chrome (Chrome menu > About Google Chrome), then `./macos/ctl.sh restart`. The worker
 downloads a matching driver automatically.
 
-**Nothing runs after a restart.** Automatic login isn't on (see Step 4), so the services are waiting
+**Nothing runs after a restart.** Automatic login isn't on (see [Make the Mac start up on its own](#make-the-mac-start-up-on-its-own)), so the services are waiting
 for someone to log in.
 
 **Local AI says "Not reachable".** LM Studio isn't running, its server isn't started, or no model is

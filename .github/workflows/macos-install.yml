@@ -1,0 +1,60 @@
+name: macOS install
+
+# Runs the real one-click installer on a macOS runner: downloads Python, Node
+# (and Chrome if missing), builds the dashboard, registers the launchd
+# services, and checks the dashboard answers. Dialogs are skipped.
+on:
+  push:
+    paths:
+      - "macos/**"
+      - "Install on Mac.command"
+      - "frontend/**"
+      - "worker/**"
+      - ".github/workflows/macos-install.yml"
+  pull_request:
+    paths:
+      - "macos/**"
+      - "Install on Mac.command"
+      - "frontend/**"
+      - "worker/**"
+      - ".github/workflows/macos-install.yml"
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      AIRLINE_NONINTERACTIVE: "1"
+      AIRLINE_HOME: ${{ github.workspace }}/../airline-install
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install from this checkout (what the double-click does)
+        run: ./macos/bootstrap.sh --source .
+      - name: Services are running and the dashboard answers
+        run: |
+          "$AIRLINE_HOME/macos/ctl.sh" status
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS -o /dev/null -w "login page: %{http_code}\n" http://127.0.0.1:3000/login
+      - name: Worker started and opened Chrome
+        run: |
+          db="$AIRLINE_HOME/data/checkin.db"
+          for _ in $(seq 1 90); do
+            sqlite3 "$db" "select 1 from worker_logs where message like 'Browser session started%'" 2>/dev/null | grep -q 1 && break
+            sleep 2
+          done
+          sqlite3 "$db" "select created_at, level, message from worker_logs order by id"
+          sqlite3 "$db" "select 1 from worker_logs where message = 'Worker started'" | grep -q 1
+      - name: Re-running the installer is safe (update path)
+        run: |
+          cp "$AIRLINE_HOME/.env" /tmp/env-before
+          ./macos/bootstrap.sh --source .
+          diff /tmp/env-before "$AIRLINE_HOME/.env"
+          curl -fsS http://127.0.0.1:3000/api/health
+      - name: Logs
+        if: always()
+        run: tail -n 100 "$AIRLINE_HOME"/data/logs/*.log || true
+      - name: Uninstall
+        if: always()
+        run: '"$AIRLINE_HOME/macos/uninstall.sh" || true'
