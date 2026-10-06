@@ -279,9 +279,24 @@ write_agent() {  # write_agent NAME
 </plist>
 PLIST
     plutil -lint "$plist" >/dev/null
-    launchctl bootout "$DOMAIN/$label" >/dev/null 2>&1 || true
-    launchctl bootstrap "$DOMAIN" "$plist" || die "couldn't start the $1 service"
+    restart_agent "$label" "$plist" || die "couldn't start the $1 service"
     echo "  $label"
+}
+
+# launchctl bootout returns before the old service has fully stopped, and
+# bootstrapping again too soon fails with "5: Input/output error" (the
+# update path). Wait for it to go away, then retry the bootstrap briefly.
+restart_agent() {  # restart_agent LABEL PLIST
+    launchctl bootout "$DOMAIN/$1" >/dev/null 2>&1 || true
+    for _ in $(seq 1 30); do
+        launchctl print "$DOMAIN/$1" >/dev/null 2>&1 || break
+        sleep 0.5
+    done
+    for _ in 1 2 3 4 5; do
+        launchctl bootstrap "$DOMAIN" "$2" 2>/dev/null && return 0
+        sleep 2
+    done
+    launchctl bootstrap "$DOMAIN" "$2"
 }
 write_agent web
 write_agent worker

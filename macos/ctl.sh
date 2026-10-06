@@ -42,6 +42,11 @@ stop() {
         if is_loaded "$label"; then
             launchctl bootout "$DOMAIN/$label" || true
         fi
+        # bootout is asynchronous; wait so an immediate start doesn't fail
+        for _ in $(seq 1 30); do
+            is_loaded "$label" || break
+            sleep 0.5
+        done
     done
     echo "Stopped."
 }
