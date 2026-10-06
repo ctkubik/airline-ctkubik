@@ -248,4 +248,5 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("notification_configs", "label", "label TEXT DEFAULT ''");
   addColumnIfMissing("notification_configs", "account_ids", "account_ids TEXT");
   addColumnIfMissing("reservations", "owner_account_id", "owner_account_id TEXT");
+  addColumnIfMissing("fare_watches", "provider", "provider TEXT DEFAULT 'amadeus'");
 }

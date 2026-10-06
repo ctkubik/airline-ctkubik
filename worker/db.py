@@ -247,6 +247,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if res_cols and "owner_account_id" not in res_cols:
         conn.execute("ALTER TABLE reservations ADD COLUMN owner_account_id TEXT")
 
+    # Fare watches: which fare source checks the watch ("amadeus" or "southwest")
+    fw_cols = [row[1] for row in conn.execute("PRAGMA table_info(fare_watches)").fetchall()]
+    if fw_cols and "provider" not in fw_cols:
+        conn.execute("ALTER TABLE fare_watches ADD COLUMN provider TEXT DEFAULT 'amadeus'")
+
     # Plain-English explanation of a diagnostic, written by the local LLM
     diag_cols = [row[1] for row in conn.execute("PRAGMA table_info(diagnostics)").fetchall()]
     if diag_cols and "ai_explanation" not in diag_cols:

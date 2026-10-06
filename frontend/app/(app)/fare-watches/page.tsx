@@ -28,6 +28,7 @@ interface FareWatch {
   best_departure_date: string | null;
   best_return_date: string | null;
   best_airline: string | null;
+  provider?: string | null;
 }
 
 interface HistoryEntry {
@@ -59,6 +60,7 @@ export default function FareWatchesPage() {
     adults: 1,
     nonstop_only: false,
     max_price: "",
+    provider: "southwest",
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -140,7 +142,7 @@ export default function FareWatchesPage() {
         name: "", origin: "", destination: "",
         depart_date_start: "", depart_date_end: "",
         return_date_start: "", return_date_end: "",
-        adults: 1, nonstop_only: false, max_price: "",
+        adults: 1, nonstop_only: false, max_price: "", provider: "southwest",
       });
       setShowForm(false);
       await load();
@@ -205,10 +207,10 @@ export default function FareWatchesPage() {
       </div>
 
       <div className="rounded-md bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-800">
-        <strong>Fare source offline:</strong> these watches used Amadeus&apos;s free self-service
-        flight API, which Amadeus shut down on July 17, 2026. Your watches are saved, but no prices
-        will be checked until a new fare source is added. Southwest fares on booked flights are
-        still tracked on the Flights page.
+        <strong>Southwest watches work; other airlines are offline.</strong> Southwest watches read
+        prices from southwest.com in this app&apos;s own browser (experimental, never within 2 hours of
+        a check-in). All-airline watches used Amadeus&apos;s free flight API, which Amadeus shut down on
+        July 17, 2026, so they&apos;re saved but not checked until a new source is added.
       </div>
 
       {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -250,6 +252,23 @@ export default function FareWatchesPage() {
               </div>
             )}
             <form onSubmit={handleCreate} className="space-y-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Airline</label>
+                <select
+                  value={form.provider}
+                  onChange={(e) => setForm({ ...form, provider: e.target.value })}
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm md:w-96"
+                >
+                  <option value="southwest">Southwest (checked in this app&apos;s browser)</option>
+                  <option value="amadeus">All other airlines (offline: no fare source)</option>
+                </select>
+                {form.provider === "southwest" && (
+                  <p className="text-xs text-gray-400">
+                    Checks up to 4 dates in each window, one way at a time, every 6 hours. Round trips add the
+                    cheapest flight each way. &quot;Nonstop only&quot; isn&apos;t applied to Southwest yet.
+                  </p>
+                )}
+              </div>
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="md:col-span-3">
                   <label className="text-xs font-medium text-gray-600">Name</label>
@@ -374,6 +393,9 @@ export default function FareWatchesPage() {
                 <Badge variant={w.is_active ? "active" : "inactive"}>
                   {w.is_active ? "watching" : "paused"}
                 </Badge>
+                <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                  {w.provider === "southwest" ? "Southwest" : "All airlines (offline)"}
+                </span>
                 {w.best_price !== null && (
                   <div className="flex items-center gap-1 text-green-700 font-semibold">
                     <TrendingDown className="h-4 w-4" />

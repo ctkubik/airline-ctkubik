@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
     adults,
     nonstop_only,
     max_price,
+    provider,
   } = body;
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -64,8 +65,8 @@ export async function POST(req: NextRequest) {
   db.prepare(
     `INSERT INTO fare_watches
      (id, name, origin, destination, depart_date_start, depart_date_end,
-      return_date_start, return_date_end, adults, nonstop_only, max_price, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      return_date_start, return_date_end, adults, nonstop_only, max_price, created_by, provider)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     name.trim(),
@@ -78,7 +79,10 @@ export async function POST(req: NextRequest) {
     Math.max(1, Math.min(9, Number(adults) || 1)),
     nonstop_only ? 1 : 0,
     max_price ? Number(max_price) : null,
-    session?.username || ""
+    session?.username || "",
+    // "southwest" = read fares from southwest.com in this app's browser;
+    // "amadeus" = the multi-airline API (offline since July 2026)
+    provider === "amadeus" ? "amadeus" : "southwest"
   );
 
   const watch = db.prepare("SELECT * FROM fare_watches WHERE id = ?").get(id);

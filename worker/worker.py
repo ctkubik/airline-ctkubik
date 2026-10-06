@@ -1318,6 +1318,96 @@ def check_named_fare_watches(conn: sqlite3.Connection) -> None:
         add_log(conn, f"Fare watch check failed: {e}", "error")
 
 
+SOUTHWEST_WATCHES_PER_CYCLE = 2
+
+
+def _checkin_within(hours: float) -> str | None:
+    """Confirmation number of a check-in starting within `hours`, if any."""
+    now_utc = datetime.now(timezone.utc)
+    for handler in list(active_handlers.values()):
+        try:
+            departure = handler.departure_time
+            if departure.tzinfo is None:
+                departure = departure.replace(tzinfo=timezone.utc)
+            seconds = (departure - timedelta(days=1) - now_utc).total_seconds()
+            if 0 < seconds < hours * 3600:
+                return handler.confirmation_number
+        except Exception:
+            continue
+    return None
+
+
+def check_southwest_watches(conn: sqlite3.Connection) -> None:
+    """Southwest fare watches (experimental): read fares from Southwest's search page.
+
+    Uses the shared Chrome session, so it never runs within 2 hours of a
+    check-in, and it puts the browser back on the mobile site before
+    releasing it (check-ins call Southwest's API from that page).
+    """
+    if not browser_session:
+        return
+    import os
+    from lib import southwest_watch as sw
+    from lib.fare_watch import record_watch_result
+    from notifications import send_notification
+
+    interval = float(os.environ.get("SOUTHWEST_WATCH_INTERVAL_HOURS", "6"))
+    cutoff = (datetime.utcnow() - timedelta(hours=interval)).isoformat()
+    today = datetime.utcnow().date().isoformat()
+    rows = conn.execute(
+        "SELECT * FROM fare_watches WHERE is_active = 1 AND provider = 'southwest' "
+        "AND (last_checked_at IS NULL OR last_checked_at < ?) AND depart_date_end >= ? "
+        "ORDER BY last_checked_at IS NOT NULL, last_checked_at LIMIT ?",
+        (cutoff, today, SOUTHWEST_WATCHES_PER_CYCLE),
+    ).fetchall()
+    if not rows:
+        return
+    soon = _checkin_within(2)
+    if soon:
+        logger.info("Southwest fare watches paused: check-in for %s within 2 hours", soon)
+        return
+
+    for row in rows:
+        watch = dict(row)
+        try:
+            with browser_session._lock:
+                driver = browser_session._driver
+                if not driver:
+                    return
+                try:
+                    def search(origin: str, destination: str, day: str) -> dict | None:
+                        driver.get(sw.search_url(origin, destination, day))
+                        time.sleep(sw.PAGE_SETTLE_SECONDS)
+                        text = driver.execute_script("return document.body ? document.body.innerText : ''") or ""
+                        sw.save_debug(watch["id"], day, f"{origin}-{destination}", text, driver.save_screenshot)
+                        return sw.read_page_fare(text)
+
+                    best = sw.find_southwest_fare(search, watch)
+                finally:
+                    # Back to the mobile site before anyone else gets the browser
+                    driver.get("https://mobile.southwest.com/login?webView=true")
+                    time.sleep(2)
+                    browser_session._headers_set = False
+                    try:
+                        browser_session._wait_for_headers()
+                    except Exception:
+                        pass
+            record_watch_result(conn, watch, best, send_notification)
+            add_log(
+                conn,
+                f"Southwest fare watch '{watch['name']}': "
+                + (f"${best['price']:.2f}" if best else "no fares found"),
+                "info",
+            )
+        except Exception as e:
+            logger.error("Southwest fare watch '%s' failed: %s", watch["name"], e)
+            conn.execute(
+                "UPDATE fare_watches SET last_checked_at = ?, last_error = ? WHERE id = ?",
+                (datetime.utcnow().isoformat(), f"Southwest search failed: {e}"[:500], watch["id"]),
+            )
+            conn.commit()
+
+
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
     """Check for manual seat check requests and execute them."""
     # '_' is a single-character wildcard in LIKE — escape it so this matches
@@ -1512,6 +1602,7 @@ def main_loop() -> None:
                 ("safety net", lambda: run_safety_net(conn)),
                 ("fare checks", lambda: check_fares(conn)),
                 ("fare watches", lambda: check_named_fare_watches(conn)),
+                ("Southwest fare watches", lambda: check_southwest_watches(conn)),
                 # Seat upgrades for A-List accounts (48h before departure)
                 ("seat upgrades", lambda: attempt_seat_upgrades(conn)),
                 ("manual seat checks", lambda: process_manual_seat_checks(conn)),

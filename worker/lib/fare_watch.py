@@ -260,6 +260,70 @@ def find_cheapest_fare(client: AmadeusClient, watch: JSON_T) -> JSON_T | None:
     return best
 
 
+def record_watch_result(conn, watch: JSON_T, best: JSON_T | None, notify_fn=None) -> None:
+    """Save a check's cheapest fare on the watch, keep history, and notify on drops.
+
+    Shared by the Amadeus checker below and the Southwest browser checker
+    (southwest_watch.py).
+    """
+    now = datetime.utcnow().isoformat()
+    if best is None:
+        conn.execute(
+            "UPDATE fare_watches SET last_checked_at = ?, last_error = ? WHERE id = ?",
+            (now, "No fares found for this route/date window", watch["id"]),
+        )
+        conn.commit()
+        return
+
+    previous_best = watch.get("best_price")
+    price_changed = previous_best is None or abs(best["price"] - previous_best) >= 0.01
+
+    conn.execute(
+        "UPDATE fare_watches SET last_checked_at = ?, last_error = NULL, "
+        "best_price = ?, best_price_currency = ?, best_departure_date = ?, "
+        "best_return_date = ?, best_airline = ?, updated_at = ? WHERE id = ?",
+        (
+            now, best["price"], best["currency"], best["departure_date"],
+            best.get("return_date"), best.get("airline", ""), now, watch["id"],
+        ),
+    )
+    if price_changed:
+        conn.execute(
+            "INSERT INTO fare_watch_history "
+            "(watch_id, price, currency, departure_date, return_date, airline, details_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                watch["id"], best["price"], best["currency"], best["departure_date"],
+                best.get("return_date"), best.get("airline", ""),
+                json.dumps(best.get("details") or {})[:2000],
+            ),
+        )
+    conn.commit()
+
+    dropped = previous_best is not None and best["price"] < previous_best - 0.01
+    under_max = watch.get("max_price") and best["price"] <= watch["max_price"]
+    if notify_fn and (dropped or (previous_best is None and under_max)):
+        when = best["departure_date"]
+        if best.get("return_date"):
+            when += f" – {best['return_date']}"
+        title = f"Fare drop: {watch['name']}"
+        message = (
+            f"{watch['origin']}->{watch['destination']} {when}: "
+            f"${best['price']:.2f}"
+            + (f" on {best['airline']}" if best.get("airline") else "")
+            + (f" (was ${previous_best:.2f})" if previous_best is not None else "")
+        )
+        try:
+            notify_fn(title, message)
+        except Exception as err:  # noqa: BLE001
+            logger.error("Fare watch notification failed: %s", err)
+
+    logger.info(
+        "Fare watch '%s': best $%.2f %s on %s",
+        watch["name"], best["price"], best["currency"], best.get("airline") or "unknown",
+    )
+
+
 def check_fare_watches(conn, notify_fn=None, interval_hours: float | None = None) -> None:
     """Check all active fare watches whose interval has elapsed.
 
@@ -276,6 +340,7 @@ def check_fare_watches(conn, notify_fn=None, interval_hours: float | None = None
 
     rows = conn.execute(
         "SELECT * FROM fare_watches WHERE is_active = 1 "
+        "AND COALESCE(provider, 'amadeus') = 'amadeus' "
         "AND (last_checked_at IS NULL OR last_checked_at < ?) "
         "AND depart_date_end >= ?",
         (cutoff, today),
@@ -295,58 +360,4 @@ def check_fare_watches(conn, notify_fn=None, interval_hours: float | None = None
             conn.commit()
             continue
 
-        if best is None:
-            conn.execute(
-                "UPDATE fare_watches SET last_checked_at = ?, last_error = ? WHERE id = ?",
-                (now, "No fares found for this route/date window", watch["id"]),
-            )
-            conn.commit()
-            continue
-
-        previous_best = watch.get("best_price")
-        price_changed = previous_best is None or abs(best["price"] - previous_best) >= 0.01
-
-        conn.execute(
-            "UPDATE fare_watches SET last_checked_at = ?, last_error = NULL, "
-            "best_price = ?, best_price_currency = ?, best_departure_date = ?, "
-            "best_return_date = ?, best_airline = ?, updated_at = ? WHERE id = ?",
-            (
-                now, best["price"], best["currency"], best["departure_date"],
-                best.get("return_date"), best.get("airline", ""), now, watch["id"],
-            ),
-        )
-        if price_changed:
-            conn.execute(
-                "INSERT INTO fare_watch_history "
-                "(watch_id, price, currency, departure_date, return_date, airline, details_json) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    watch["id"], best["price"], best["currency"], best["departure_date"],
-                    best.get("return_date"), best.get("airline", ""),
-                    json.dumps(best.get("details") or {})[:2000],
-                ),
-            )
-        conn.commit()
-
-        dropped = previous_best is not None and best["price"] < previous_best - 0.01
-        under_max = watch.get("max_price") and best["price"] <= watch["max_price"]
-        if notify_fn and (dropped or (previous_best is None and under_max)):
-            when = best["departure_date"]
-            if best.get("return_date"):
-                when += f" – {best['return_date']}"
-            title = f"Fare drop: {watch['name']}"
-            message = (
-                f"{watch['origin']}->{watch['destination']} {when}: "
-                f"${best['price']:.2f}"
-                + (f" on {best['airline']}" if best.get("airline") else "")
-                + (f" (was ${previous_best:.2f})" if previous_best is not None else "")
-            )
-            try:
-                notify_fn(title, message)
-            except Exception as err:  # noqa: BLE001
-                logger.error("Fare watch notification failed: %s", err)
-
-        logger.info(
-            "Fare watch '%s': best $%.2f %s on %s",
-            watch["name"], best["price"], best["currency"], best.get("airline") or "unknown",
-        )
+        record_watch_result(conn, watch, best, notify_fn)
