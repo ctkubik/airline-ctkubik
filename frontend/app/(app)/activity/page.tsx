@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, AlertTriangle } from "lucide-react";
+import { RefreshCw, AlertTriangle, Sparkles } from "lucide-react";
 
 interface LogEntry {
   id: number;
@@ -25,6 +25,7 @@ interface DiagnosticEntry {
   headers_snapshot: string;
   response_snapshot: string;
   created_at: string;
+  ai_explanation?: string | null;
 }
 
 const levelColors: Record<string, string> = {
@@ -60,6 +61,36 @@ export default function ActivityPage() {
   const [diagCategory, setDiagCategory] = useState("all");
   const [categories, setCategories] = useState<string[]>([]);
   const [expandedDiag, setExpandedDiag] = useState<number | null>(null);
+
+  // Plain-English explanations from the local LLM
+  const [llmReady, setLlmReady] = useState(false);
+  const [explaining, setExplaining] = useState<number | null>(null);
+  const [explanations, setExplanations] = useState<Record<number, string>>({});
+  const [explainError, setExplainError] = useState<Record<number, string>>({});
+
+  useEffect(() => {
+    fetch("/api/llm/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => setLlmReady(Boolean(s?.enabled && s?.reachable && s?.model)))
+      .catch(() => setLlmReady(false));
+  }, []);
+
+  async function explainDiagnostic(id: number, refresh = false) {
+    setExplaining(id);
+    setExplainError((e) => ({ ...e, [id]: "" }));
+    const res = await fetch("/api/diagnostics/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, refresh }),
+    });
+    const body = await res.json().catch(() => null);
+    if (res.ok && body?.explanation) {
+      setExplanations((x) => ({ ...x, [id]: body.explanation }));
+    } else {
+      setExplainError((e) => ({ ...e, [id]: body?.error || "Couldn't get an explanation" }));
+    }
+    setExplaining(null);
+  }
 
   const fetchLogs = useCallback(async (reset = false) => {
     setLoading(true);
@@ -286,6 +317,42 @@ export default function ActivityPage() {
                       </div>
                       {expandedDiag === diag.id && (
                         <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-3 text-sm">
+                          {(explanations[diag.id] || diag.ai_explanation) ? (
+                            <div className="rounded-md border border-blue-100 bg-blue-50 p-3">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="flex items-center gap-1 text-xs font-medium text-blue-700">
+                                  <Sparkles className="h-3.5 w-3.5" /> In plain English
+                                </span>
+                                {llmReady && (
+                                  <button
+                                    className="text-xs text-blue-700 underline disabled:opacity-50"
+                                    disabled={explaining === diag.id}
+                                    onClick={() => explainDiagnostic(diag.id, true)}
+                                  >
+                                    {explaining === diag.id ? "Rewriting..." : "Regenerate"}
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-gray-800 whitespace-pre-line">
+                                {explanations[diag.id] || diag.ai_explanation}
+                              </p>
+                            </div>
+                          ) : (
+                            llmReady && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={explaining === diag.id}
+                                onClick={() => explainDiagnostic(diag.id)}
+                              >
+                                <Sparkles className="h-3.5 w-3.5 mr-1 text-blue-600" />
+                                {explaining === diag.id ? "Asking the local LLM..." : "Explain this"}
+                              </Button>
+                            )
+                          )}
+                          {explainError[diag.id] && (
+                            <div className="text-xs text-red-700">{explainError[diag.id]}</div>
+                          )}
                           <div>
                             <span className="font-medium text-gray-600">Expected: </span>
                             <span className="text-green-700">{diag.expected_behavior}</span>

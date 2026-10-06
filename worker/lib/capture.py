@@ -13,11 +13,12 @@ import time
 from datetime import datetime
 from typing import Any
 
+from .config import CAPTURES_DIR
 from .log import get_logger
 
 logger = get_logger(__name__)
 
-CAPTURES_DIR = "/app/data/captures"
+
 MAX_RESPONSE_BODY_SIZE = 50000  # 50KB per network response body
 
 

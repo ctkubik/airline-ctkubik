@@ -14,7 +14,7 @@ from sbvirtualdisplay import Display
 from seleniumbase import Driver
 from seleniumbase.fixtures import page_actions as seleniumbase_actions
 
-from .config import IS_DOCKER
+from .config import BROWSER_MODE, CAPTURES_DIR, IS_DOCKER
 from .log import get_logger
 from .utils import DriverTimeoutError, LoginError, RequestError, random_sleep_duration
 
@@ -118,15 +118,19 @@ class BrowserSession:
             self._stop_internal()
 
         logger.info("Starting browser session")
-        if IS_DOCKER:
+        if BROWSER_MODE == "xvfb":
             self._start_display()
 
+        # Docker ships a matched chromedriver; elsewhere (macOS) SeleniumBase
+        # downloads the driver that matches the installed Chrome.
         driver_version = "keep" if IS_DOCKER else "mlatest"
+        headed = BROWSER_MODE in ("xvfb", "headed")
+        logger.info("Browser mode: %s", BROWSER_MODE)
         self._driver = Driver(
             binary_location=None,
             driver_version=driver_version,
-            headed=IS_DOCKER,
-            headless1=not IS_DOCKER,
+            headed=headed,
+            headless1=not headed,
             uc_cdp_events=True,
             undetectable=True,
             incognito=True,
@@ -330,8 +334,8 @@ class BrowserSession:
                 # Take screenshot for diagnostics if login form doesn't appear
                 logger.error("Login form did not load: %s", e)
                 try:
-                    os.makedirs("/app/data/captures", exist_ok=True)
-                    self._driver.save_screenshot("/app/data/captures/login_form_failed.png")
+                    os.makedirs(CAPTURES_DIR, exist_ok=True)
+                    self._driver.save_screenshot(os.path.join(CAPTURES_DIR, "login_form_failed.png"))
                 except Exception:
                     pass
                 raise DriverTimeoutError(f"Login form did not load after 30 seconds: {e}")

@@ -6,7 +6,9 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 
-DB_PATH = os.environ.get("DB_PATH", os.path.join("/app", "data", "checkin.db"))
+DB_PATH = os.environ.get(
+    "DB_PATH", os.path.join(os.environ.get("DATA_DIR", os.path.join("/app", "data")), "checkin.db")
+)
 
 _schema_lock = threading.Lock()
 _schema_initialized = False
@@ -215,6 +217,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     sp_cols = [row[1] for row in conn.execute("PRAGMA table_info(seat_preferences)").fetchall()]
     if sp_cols and "fare_check_mode" not in sp_cols:
         conn.execute("ALTER TABLE seat_preferences ADD COLUMN fare_check_mode TEXT DEFAULT 'same_day_nonstop'")
+
+    # Plain-English explanation of a diagnostic, written by the local LLM
+    diag_cols = [row[1] for row in conn.execute("PRAGMA table_info(diagnostics)").fetchall()]
+    if diag_cols and "ai_explanation" not in diag_cols:
+        conn.execute("ALTER TABLE diagnostics ADD COLUMN ai_explanation TEXT")
 
     conn.commit()
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Trash2, Plus, Save, MessageSquare } from "lucide-react";
+import { Trash2, Plus, Save, MessageSquare, Sparkles, RefreshCw } from "lucide-react";
 import type { NotificationConfig } from "@/lib/types";
 
 const ALL_SEAT_LETTERS = ["A", "B", "C", "D", "E", "F"];
@@ -30,10 +30,32 @@ export default function SettingsPage() {
   const [fareCheckMode, setFareCheckMode] = useState("same_day_nonstop");
   const [seatSaved, setSeatSaved] = useState(false);
 
+  // Local LLM (LM Studio) connection status
+  const [llm, setLlm] = useState<{
+    enabled: boolean;
+    baseUrl: string;
+    reachable: boolean;
+    model: string | null;
+    error?: string;
+  } | null>(null);
+  const [llmChecking, setLlmChecking] = useState(false);
+
   useEffect(() => {
     fetchNotifications();
     fetchPreferences();
+    fetchLlmStatus();
   }, []);
+
+  async function fetchLlmStatus() {
+    setLlmChecking(true);
+    try {
+      const res = await fetch("/api/llm/status");
+      setLlm(res.ok ? await res.json() : null);
+    } catch {
+      setLlm(null);
+    }
+    setLlmChecking(false);
+  }
 
   async function fetchNotifications() {
     const res = await fetch("/api/notifications");
@@ -387,6 +409,43 @@ export default function SettingsPage() {
               </div>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Local AI */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5" /> Local AI (LM Studio)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-gray-600">
+            An optional model running on this machine. It explains errors on the Diagnostics tab, fills in
+            fare watches from a sentence, and helps the seat-upgrade automation when Southwest changes its
+            website. Check-ins never depend on it.
+          </p>
+          {llm === null ? (
+            <p className="text-gray-500">Checking...</p>
+          ) : !llm.enabled ? (
+            <p className="text-gray-700">
+              <span className="font-medium">Off.</span> To turn it on, set <code>LLM_ENABLED=true</code> in{" "}
+              <code>.env</code>, start LM Studio&apos;s local server with a model loaded, and restart the app.
+            </p>
+          ) : llm.reachable && llm.model ? (
+            <p className="text-green-700">
+              <span className="font-medium">Connected</span> to {llm.baseUrl} using <code>{llm.model}</code>.
+            </p>
+          ) : (
+            <p className="text-red-700">
+              <span className="font-medium">Not reachable</span> at {llm.baseUrl}
+              {llm.error ? `: ${llm.error}` : ""}. Open LM Studio, load a model, and start the server
+              (Developer tab).
+            </p>
+          )}
+          <Button variant="outline" size="sm" onClick={fetchLlmStatus} disabled={llmChecking}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1 ${llmChecking ? "animate-spin" : ""}`} /> Check again
+          </Button>
         </CardContent>
       </Card>
     </div>

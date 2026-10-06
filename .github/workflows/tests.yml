@@ -8,11 +8,13 @@ on:
     paths:
       - "**.py"
       - "**/requirements.txt"
+      - "macos/**"
       - ".github/workflows/tests.yml"
   pull_request:
     paths:
       - "**.py"
       - "**/requirements.txt"
+      - "macos/**"
       - ".github/workflows/tests.yml"
 
 jobs:
@@ -40,3 +42,28 @@ jobs:
       - name: Run integration tests
         if: github.event.pull_request || github.ref == 'refs/heads/master'
         run: pytest tests/integration --cov
+
+  # Tests for the web app's worker (worker/), which the jobs above don't cover.
+  # Runs on macOS too because the worker is installed natively there.
+  worker-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r worker/requirements.txt pytest
+      - name: Run worker tests
+        run: python -m pytest worker/tests
+      - name: Check macOS scripts
+        run: for f in macos/*.sh; do bash -n "$f"; done

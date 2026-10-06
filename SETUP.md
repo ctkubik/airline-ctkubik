@@ -14,7 +14,7 @@ No prior Docker knowledge is assumed. Budget 30–60 minutes for everything.
 - [Part 2: Download the app](#part-2-download-the-app)
 - [Part 3: Start the app](#part-3-start-the-app)
 - [Part 4: First-time setup in the app](#part-4-first-time-setup-in-the-app)
-- [Part 5: Fare watches for other airlines (Amadeus keys)](#part-5-fare-watches-for-other-airlines-amadeus-keys)
+- [Part 5: Fare watches for other airlines](#part-5-fare-watches-for-other-airlines)
 - [Part 6: Access it from anywhere](#part-6-access-it-from-anywhere)
 - [Part 7: Everyday operations](#part-7-everyday-operations)
 - [Troubleshooting](#troubleshooting)
@@ -61,6 +61,10 @@ Pick your operating system:
 5. Open **PowerShell** (Start menu → type "PowerShell") for the commands below.
 
 ### Mac
+> **Running this on a Mac Mini?** Skip Docker and use the native setup in
+> **[MACOS.md](MACOS.md)** instead. It starts at boot without Docker Desktop,
+> keeps the Mac awake for check-ins, and can use a local AI model in LM Studio.
+
 1. Download **Docker Desktop** from
    [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
    (choose Apple Silicon or Intel to match your Mac).
@@ -179,36 +183,20 @@ docker compose up -d
    (see the README's [Seat Upgrades](README.md#seat-upgrades-experimental)
    section).
 
-## Part 5: Fare watches for other airlines (Amadeus keys)
+## Part 5: Fare watches for other airlines
 
-The **Fare Watches** page tracks prices across airlines (United, Delta,
-American, Frontier, etc. — everything except Southwest, which no third-party
-API carries; Southwest fares are tracked natively on the Flights page). It
-uses the free Amadeus flight-search API, which needs a one-time signup:
+> **Currently offline.** The **Fare Watches** page tracked prices across
+> airlines using Amadeus's free Self-Service flight API. Amadeus shut that
+> program down on **July 17, 2026** and disabled every self-service key, and
+> new sign-ups are closed. Watches you create are saved, but no prices are
+> checked until a new fare source is added to the app.
+>
+> Southwest fares on flights you've booked are not affected: they're still
+> tracked on the **Flights** page.
 
-1. Go to [developers.amadeus.com](https://developers.amadeus.com) and click
-   **Register** (free, no credit card)
-2. After logging in, open **My Self-Service Workspace** → **Create new app**
-   (name it anything, e.g. "fare-watch")
-3. Copy the **API Key** and **API Secret** it shows you
-4. Add them to your `.env` file:
-   ```
-   AMADEUS_CLIENT_ID=your_api_key_here
-   AMADEUS_CLIENT_SECRET=your_api_secret_here
-   ```
-5. Apply: `docker compose up -d`
-
-Now create a watch: **Fare Watches → New Watch**. Give it a name ("Mom's
-visit in October"), the airports, and a departure window — optionally a
-return window, traveler count, nonstop-only, and a target price. The app
-checks every 6 hours and notifies you (same services as check-in alerts) when
-the price drops or comes in under your target.
-
-> **Good to know**: new Amadeus accounts start in their **test environment** —
-> limited, cached fare data that's fine for trying the feature. For real
-> coverage, open your app in the Amadeus dashboard and request **production
-> keys** (also free at this usage level), then set `AMADEUS_ENV=production`
-> in `.env`.
+If you are an Amadeus **Enterprise** customer, your keys still work: add
+`AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET` and `AMADEUS_ENV=production` to
+`.env` and restart.
 
 ## Part 6: Access it from anywhere
 
@@ -347,10 +335,9 @@ Docker Desktop normally prompts once — click Allow.
 Make sure the OS is 64-bit (`uname -m` should print `aarch64`). 32-bit
 systems can't run this app's browser.
 
-**Fare watches say "Setup needed" or never update**
-The Amadeus keys are missing or wrong — recheck Part 5, and remember
-`docker compose up -d` after editing `.env`. Individual watch errors appear
-in red on the watch card.
+**Fare watches never update**
+Expected for now: the Amadeus fare source was shut down (see Part 5).
+Individual watch errors appear in red on the watch card.
 
 **Tunnel shows DOWN in Cloudflare**
 The tunnel container isn't running: `docker compose --profile tunnel up -d`,

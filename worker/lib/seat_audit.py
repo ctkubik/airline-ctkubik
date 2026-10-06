@@ -8,11 +8,12 @@ import time
 from datetime import datetime
 from typing import Any
 
+from .config import CAPTURES_DIR
 from .log import get_logger
 
 logger = get_logger(__name__)
 
-AUDIT_BASE_DIR = "/app/data/captures"
+AUDIT_BASE_DIR = CAPTURES_DIR
 
 
 class SeatUpgradeAudit:

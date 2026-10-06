@@ -2,7 +2,10 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
-const DB_PATH = process.env.DB_PATH || path.resolve("/app", "data", "checkin.db");
+// DATA_DIR is /app/data in Docker and the repo's ./data folder on a native
+// macOS install (set by macos/run.sh).
+const DATA_DIR = process.env.DATA_DIR || path.resolve("/app", "data");
+const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, "checkin.db");
 
 // Ensure data directory exists
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -223,4 +226,6 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("fare_history", "my_flight_fare", "my_flight_fare INTEGER");
 
   addColumnIfMissing("seat_preferences", "fare_check_mode", "fare_check_mode TEXT DEFAULT 'same_day_nonstop'");
+
+  addColumnIfMissing("diagnostics", "ai_explanation", "ai_explanation TEXT");
 }

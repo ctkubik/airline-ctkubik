@@ -38,6 +38,7 @@ from db import (
     get_stale_capture_dirs,
     recover_stuck_checkins,
 )
+from lib.config import CAPTURES_DIR
 from lib.log import get_logger
 from lib.utils import (
     CheckFaresOption,
@@ -47,6 +48,7 @@ from lib.utils import (
     RequestError,
     get_current_time,
 )
+from lib import llm_browser
 from lib.browser_session import BrowserSession
 from lib.checkin_handler import CheckInHandler
 
@@ -656,6 +658,27 @@ def check_fares(conn: sqlite3.Connection) -> None:
 
 SEAT_UPGRADE_COOLDOWN = 3 * 3600  # 3 hours between successful attempts per flight
 
+# Fields on Southwest's manage-reservation lookup form, described for the LLM
+LOOKUP_FORM_FIELDS = {
+    "confirmation_number": "the reservation confirmation number (6-character record locator)",
+    "first_name": "the passenger's first name",
+    "last_name": "the passenger's last name",
+}
+
+
+def _llm_click(conn: sqlite3.Connection, driver, flight_id: str, goal: str) -> bool:
+    """Fallback when hard-coded selectors miss: let the local LLM pick the element."""
+    selector = llm_browser.find_element(driver, goal)
+    if not selector:
+        return False
+    try:
+        driver.click(selector)
+    except Exception as e:
+        add_log(conn, f"Local LLM picked an element for '{goal}' but clicking it failed: {e}", "warning", flight_id)
+        return False
+    add_log(conn, f"Selectors missed '{goal}'; local LLM found and clicked it", "info", flight_id)
+    return True
+
 
 def _restore_mobile_origin(conn: sqlite3.Connection, flight_id: str) -> None:
     """Ensure the shared browser is back on mobile.southwest.com.
@@ -785,7 +808,7 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
 
         try:
             import os
-            cap_dir = f"/app/data/captures/{flight_id}"
+            cap_dir = os.path.join(CAPTURES_DIR, flight_id)
             os.makedirs(cap_dir, exist_ok=True)
 
             # Step 1: Navigate to manage reservation lookup (no login required)
@@ -839,6 +862,13 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                         return null;
                     """)
 
+                llm_fields = None
+                if not conf_input_sel:
+                    llm_fields = llm_browser.find_form_fields(driver, LOOKUP_FORM_FIELDS)
+                    if llm_fields and llm_fields.get("confirmation_number"):
+                        conf_input_sel = llm_fields["confirmation_number"]
+                        add_log(conn, "Selectors missed the confirmation field; local LLM found it", "info", flight_id)
+
                 if not conf_input_sel:
                     driver.save_screenshot(f"{cap_dir}/00_no_form.png")
                     audit.save_dom("manage_reservation_form_dom.html")
@@ -872,6 +902,13 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                         break
                     except Exception:
                         continue
+
+                if not first_name_sel or not last_name_sel:
+                    llm_fields = llm_fields or llm_browser.find_form_fields(driver, LOOKUP_FORM_FIELDS)
+                    if llm_fields and llm_fields.get("first_name") and llm_fields.get("last_name"):
+                        first_name_sel = llm_fields["first_name"]
+                        last_name_sel = llm_fields["last_name"]
+                        add_log(conn, "Selectors missed the name fields; local LLM found them", "info", flight_id)
 
                 if not first_name_sel or not last_name_sel:
                     driver.save_screenshot(f"{cap_dir}/00_no_name_fields.png")
@@ -920,6 +957,12 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                         }
                         return false;
                     """)
+
+                if not submit_clicked:
+                    submit_clicked = _llm_click(
+                        conn, driver, flight_id,
+                        "the button that submits this form to look up the reservation",
+                    )
 
                 if not submit_clicked:
                     driver.save_screenshot(f"{cap_dir}/01_no_submit.png")
@@ -1001,6 +1044,13 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                 """)
 
                 add_log(conn, f"Modify seats click: {str(modify_result)[:200]}", "info", flight_id)
+
+                if not modify_result or not str(modify_result).startswith("clicked"):
+                    if _llm_click(
+                        conn, driver, flight_id,
+                        "the link or button that opens seat selection to change the seats on this trip",
+                    ):
+                        modify_result = "clicked (found by local LLM)"
 
                 if not modify_result or not str(modify_result).startswith("clicked"):
                     driver.save_screenshot(f"{cap_dir}/03_no_modify_seats.png")
@@ -1107,6 +1157,12 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
 
                 all_seats = seats_data.get("seats", [])
                 page_meta = seats_data.get("meta", {})
+                if not all_seats:
+                    llm_seats = llm_browser.extract_seats(driver)
+                    if llm_seats:
+                        all_seats = llm_seats
+                        seats_data["seats"] = llm_seats
+                        add_log(conn, f"Selectors found no seats; local LLM read {len(llm_seats)} available seats", "info", flight_id)
                 add_log(conn, f"Page: {page_meta.get('title', '?')} | Found {len(all_seats)} seat elements | URL: {page_meta.get('url', '?')}", "info", flight_id)
 
                 with open(f"{cap_dir}/seat_data.json", "w") as f:
@@ -1139,7 +1195,7 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                             elif letter in preferred_letters: score = 80
                             elif letter in fallback_letters and row in preferred_rows: score = 60
                             elif letter in fallback_letters: score = 40
-                            available_seats.append({"seat": seat_id, "row": row, "letter": letter, "score": score})
+                            available_seats.append({"seat": seat_id, "row": row, "letter": letter, "score": score, "selector": s.get("selector")})
 
                     available_seats.sort(key=lambda x: (-x["score"], x["row"]))
                     add_log(conn, f"Available seats: {len(available_seats)} | Top 5: {[s['seat'] for s in available_seats[:5]]}", "info", flight_id)
@@ -1155,7 +1211,10 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                         audit.begin_step("click_seat")
 
                         clicked = False
-                        for click_sel in [f"[data-seat-number='{best['seat']}']", f"button:contains('{best['seat']}')", f"[aria-label*='{best['seat']}']"]:
+                        click_selectors = [f"[data-seat-number='{best['seat']}']", f"button:contains('{best['seat']}')", f"[aria-label*='{best['seat']}']"]
+                        if best.get("selector"):
+                            click_selectors.insert(0, best["selector"])
+                        for click_sel in click_selectors:
                             try:
                                 driver.click(click_sel)
                                 clicked = True
@@ -1168,25 +1227,51 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                             time.sleep(2)
                             driver.save_screenshot(f"{cap_dir}/05_after_click.png")
 
+                            confirm_clicked = False
                             for confirm_sel in ["button:contains('Continue')", "button:contains('Confirm')", "button:contains('Save')", "button:contains('Done')", "button[type='submit']"]:
                                 try:
                                     if driver.is_element_visible(confirm_sel):
                                         driver.click(confirm_sel)
+                                        confirm_clicked = True
                                         add_log(conn, f"Clicked confirm: {confirm_sel}", "info", flight_id)
-                                        time.sleep(3)
-                                        driver.save_screenshot(f"{cap_dir}/06_after_confirm.png")
                                         break
                                 except Exception:
                                     continue
+                            if not confirm_clicked:
+                                confirm_clicked = _llm_click(
+                                    conn, driver, flight_id,
+                                    "the button that confirms, saves, or continues with the selected seat",
+                                )
+                            if confirm_clicked:
+                                time.sleep(3)
+                                driver.save_screenshot(f"{cap_dir}/06_after_confirm.png")
 
-                            update_flight_seat(conn, flight_id, best["seat"])
-                            add_log(conn, f"Seat {best['seat']} selected for {conf_num}!", "info", flight_id)
-                            audit.end_step(success=True, data={"seat": best["seat"], "score": best["score"], "clicked": True, "confirmed": True})
-                            try:
-                                from notifications import send_notification
-                                send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} selected for {route}")
-                            except Exception:
-                                pass
+                            # Selectors can't tell whether Southwest accepted the
+                            # change; when the local LLM is on, read the page and
+                            # only record the seat if it says the change went through.
+                            verdict = llm_browser.verify_outcome(
+                                driver,
+                                f"Did the seat change to seat {best['seat']} go through and get saved on the reservation?",
+                            )
+                            if verdict is not None:
+                                add_log(conn, f"LLM check of seat change: {verdict['answer']} - {verdict['summary']}", "info", flight_id)
+
+                            if verdict is not None and verdict["answer"] is False:
+                                add_log(conn, f"Seat {best['seat']} was NOT confirmed by Southwest for {conf_num}", "warning", flight_id)
+                                audit.end_step(success=False, data={"seat": best["seat"], "clicked": True, "confirmed": False, "llm_summary": verdict["summary"]})
+                            else:
+                                confirmed = verdict is not None and verdict["answer"] is True
+                                update_flight_seat(conn, flight_id, best["seat"])
+                                add_log(conn, f"Seat {best['seat']} selected for {conf_num}!" + ("" if confirmed else " (unconfirmed)"), "info", flight_id)
+                                audit.end_step(success=True, data={"seat": best["seat"], "score": best["score"], "clicked": True, "confirmed": confirmed})
+                                try:
+                                    from notifications import send_notification
+                                    if confirmed:
+                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} confirmed for {route}")
+                                    else:
+                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} selected for {route} (not confirmed, check the Southwest app)")
+                                except Exception:
+                                    pass
                         else:
                             add_log(conn, f"Could not click seat {best['seat']}", "warning", flight_id)
                             audit.end_step(success=False, data={"seat": best["seat"], "clicked": False})
@@ -1208,7 +1293,7 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
             add_log(conn, f"Seat upgrade error: {e}", "error", flight_id)
             audit.finish(status="failed", error_message=str(e))
             try:
-                browser_session._driver.save_screenshot(f"/app/data/captures/{flight_id}/error.png")
+                browser_session._driver.save_screenshot(os.path.join(CAPTURES_DIR, flight_id, "error.png"))
             except Exception:
                 pass
         finally:
@@ -1302,7 +1387,7 @@ def run_daily_cleanup(conn: sqlite3.Connection) -> None:
     # Filesystem sweep: delete ANY capture files older than 5 days
     # This catches files from repeated seat upgrade attempts on active flights
     # that aren't yet linked to "old" DB records
-    captures_base = "/app/data/captures"
+    captures_base = CAPTURES_DIR
     cutoff = time.time() - (5 * 24 * 3600)
     removed_files = 0
     removed_empty = 0

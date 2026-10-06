@@ -4,7 +4,9 @@ A web application that automatically checks you in to your Southwest Airlines fl
 
 **Repository**: [github.com/ctkubik/airline-ctkubik](https://github.com/ctkubik/airline-ctkubik)
 
-> **New to Docker?** Follow the **[Step-by-Step Setup Guide](SETUP.md)** — it covers installing Docker, starting the app, notifications, fare-watch API keys, and getting a public URL with Cloudflare Tunnel, assuming no prior experience.
+> **Hosting on a Mac Mini?** Use the native macOS setup in **[MACOS.md](MACOS.md)**: one install script, starts at boot, keeps the Mac awake for check-ins, and optional local AI through LM Studio.
+>
+> **New to Docker?** Follow the **[Step-by-Step Setup Guide](SETUP.md)** — it covers installing Docker, starting the app, notifications, and getting a public URL with Cloudflare Tunnel, assuming no prior experience.
 
 **Note**: If you are checking into an international flight, make sure to fill out all the passport information beforehand.
 
@@ -13,6 +15,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - [Features](#features)
 - [Architecture](#architecture)
 - [Installation](#installation)
+    * [Mac Mini / macOS (native)](#mac-mini--macos-native)
     * [Quick Start (Docker)](#quick-start-docker)
     * [Remote Access](#remote-access)
     * [Option 2: Web App (Railway)](#option-2-web-app-railway)
@@ -28,6 +31,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
     * [Notifications](#notifications)
 - [Check-In Data Capture](#check-in-data-capture)
 - [Self-Healing Diagnostics](#self-healing-diagnostics)
+- [Local AI (optional)](#local-ai-optional)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [FAQ](#faq)
@@ -55,7 +59,8 @@ A web application that automatically checks you in to your Southwest Airlines fl
 
 ### Fare Watches (any airline)
 - **Named searches**: Create a watch per trip — "Mom's visit in October", "Spring break to Florida"
-- **Multi-airline**: Checks fares across carriers via the free [Amadeus](https://developers.amadeus.com) flight-search API (Southwest fares are tracked natively by the rest of the app)
+- **Multi-airline**: Checked fares across carriers via Amadeus's free Self-Service flight-search API. **Offline since Amadeus shut that API down on July 17, 2026**; watches are kept until a new fare source is added (Southwest fares on booked flights are still tracked natively)
+- **Describe a trip** *(with local AI)*: type "Mom's visit, Phoenix to Chicago the week of Nov 20" and the form fills itself in
 - **Date windows**: Watch a whole departure/return window, not just one date
 - **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
 
@@ -127,6 +132,19 @@ The web app runs as a single Docker container with two processes managed by supe
 | Data Capture | Chrome DevTools Protocol for screenshots, network traffic, and DOM snapshots |
 
 ## Installation
+
+### Mac Mini / macOS (native)
+
+Runs directly on macOS with no Docker. Recommended for a Mac Mini. Full beginner walkthrough: **[MACOS.md](MACOS.md)**.
+
+```shell
+cd ~
+git clone https://github.com/ctkubik/airline-ctkubik.git
+cd airline-ctkubik
+./macos/install.sh
+```
+
+The installer sets up Python, Node and Chrome with Homebrew, builds the dashboard, generates your login, and registers two `launchd` services that start at login and restart on crashes. The worker runs under `caffeinate` so the Mac can't sleep through a check-in. Use `./macos/ctl.sh status|logs|restart` afterwards, and re-run the installer after `git pull` to update.
 
 ### Quick Start (Docker)
 
@@ -290,12 +308,11 @@ Admin-only page to manage who can log in:
 ### Fare Watches (`/fare-watches`)
 Named multi-airline fare tracking for trips you're planning:
 
-1. Get free API keys: sign up at [developers.amadeus.com](https://developers.amadeus.com), create an app, and put `AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET` in `.env`
-2. Create a watch: name it (e.g. "Mom's visit in October"), set origin/destination airports and a departure window — optionally a return window, traveler count, nonstop-only, and a target price
-3. The worker checks each watch every 6 hours (`FARE_WATCH_INTERVAL_HOURS` to change) and records the cheapest fare found
-4. You get a notification (Telegram/SMS/etc. — same services as check-in alerts) when the price drops or a fare is found under your target
+> **Fare source offline:** watches used Amadeus's free Self-Service flight API, which Amadeus shut down on July 17, 2026 (all self-service keys were disabled). Watches are saved, but no prices are checked until a new fare source is added. Amadeus Enterprise customers can still set `AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET` / `AMADEUS_ENV=production`.
 
-Notes: the free Amadeus tier starts in a **test environment** with limited/cached data — good enough to try it; request (free) production keys in their dashboard for real coverage. Amadeus covers most airlines but **not Southwest**; Southwest fares are tracked natively on the Flights page.
+1. Create a watch: name it (e.g. "Mom's visit in October"), set origin/destination airports and a departure window, and optionally a return window, traveler count, nonstop-only, and a target price. With [local AI](#local-ai-optional) on, type a sentence in **Describe the trip** and click **Fill in** instead
+2. The worker checks each watch every 6 hours (`FARE_WATCH_INTERVAL_HOURS` to change) and records the cheapest fare found
+3. You get a notification (Telegram/SMS/etc., same services as check-in alerts) when the price drops or a fare is found under your target
 
 ### Seat Upgrades (experimental)
 The A-List auto seat-upgrade automates Southwest's desktop website in a real browser. Southwest changes that site frequently, so this feature is fragile: it may fail to find the seat map and can report a seat as selected without Southwest actually confirming it. Failures no longer interfere with check-ins (the browser is always restored, attempts are rate-limited, and check-ins take absolute priority), but treat any "seat selected" notification as unconfirmed until you verify in the Southwest app. The capture/audit system records every attempt (screenshots + DOM) under the flight's captures to help debug. Leave the per-account toggle off if you don't want it attempted at all.
@@ -316,7 +333,14 @@ python3 southwest.py --help
 | `AUTH_USERNAME` | Web UI login username | `admin` |
 | `AUTH_PASSWORD` | Web UI login password | auto-generated on first boot (see container logs) |
 | `AUTH_SECRET` | Secret key for signing auth cookies (use 20+ random chars) | auto-generated on first boot |
-| `DB_PATH` | Path to SQLite database file | `/app/data/checkin.db` |
+| `DATA_DIR` | Folder for the database, captures and logs | `/app/data` (Docker), `./data` (macOS) |
+| `DB_PATH` | Path to SQLite database file | `$DATA_DIR/checkin.db` |
+| `BROWSER_MODE` | `xvfb` (virtual display), `headed` (real Chrome window) or `headless` | `xvfb` in Docker, `headed` on macOS |
+| `PORT` / `BIND_ADDRESS` | Dashboard port and listen address (macOS native) | `3000` / `0.0.0.0` |
+| `LLM_ENABLED` | Turn on the optional local AI features | (off) |
+| `LLM_BASE_URL` | OpenAI-compatible server (LM Studio) | `http://localhost:1234/v1` |
+| `LLM_MODEL` | Model id to use; blank = first loaded chat model | (blank) |
+| `LLM_TIMEOUT` | Seconds to wait for each model answer | `60` |
 | `RAILWAY_RUN_UID` | Set to `0` if Railway volume has permission issues | (unset) |
 
 There are no insecure default credentials: if `AUTH_PASSWORD`/`AUTH_SECRET` are unset, the Docker entrypoint generates random values, persists them in the data volume, and prints the login password in the container logs. Outside Docker (e.g. Railway), you must set them yourself — the app refuses logins until they are set.
@@ -393,6 +417,21 @@ The system includes a structured diagnostics framework to track Southwest API ch
 - **Fare check diagnostics**: Captures the full `change_link` object and error response when fare checks fail
 
 This enables progressive adaptation to Southwest's API changes without requiring code updates for every change. Check the Diagnostics tab when things aren't working to see exactly what Southwest is returning.
+
+## Local AI (optional)
+
+The app can use a model running on your own machine in [LM Studio](https://lmstudio.ai) (or any OpenAI-compatible server such as Ollama or llama.cpp). Nothing leaves the machine and there's no per-use cost. Setup steps are in [MACOS.md](MACOS.md#step-5-optional-local-ai-with-lm-studio); the short version is `LLM_ENABLED=true` in `.env` with LM Studio's server running.
+
+| Feature | Where | What the model does |
+|---------|-------|---------------------|
+| Plain-English diagnostics | Activity > Diagnostics > **Explain this** | Explains a raw API failure and what to do, cached on the entry |
+| Describe a trip | Fare Watches > New Watch | Turns a sentence into the watch's airports, dates, travelers and price |
+| Seat-upgrade fallbacks | Automatic | When hard-coded selectors miss the lookup form, a button, or the seat map, it picks the matching element from a numbered list of what's on the page |
+| Seat-change verification | Automatic | Reads the page after a seat change; the seat is only recorded and announced as confirmed when the page says so |
+
+Design rules: the model never touches check-ins, never writes selectors or code (it only picks an index from a list the app builds), and every call has a timeout. If the model is off, slow or wrong, the app behaves exactly as it does without it. **Settings > Local AI** shows whether it's connected.
+
+From Docker, point `LLM_BASE_URL` at `http://host.docker.internal:1234/v1`.
 
 ## Troubleshooting
 

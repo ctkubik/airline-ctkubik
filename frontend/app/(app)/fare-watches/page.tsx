@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Plane, TrendingDown, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Plane, TrendingDown, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 
 interface FareWatch {
   id: string;
@@ -41,7 +41,6 @@ interface HistoryEntry {
 
 export default function FareWatchesPage() {
   const [watches, setWatches] = useState<FareWatch[]>([]);
-  const [providerConfigured, setProviderConfigured] = useState(true);
   const [intervalHours, setIntervalHours] = useState(6);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -63,15 +62,63 @@ export default function FareWatchesPage() {
   });
   const [submitting, setSubmitting] = useState(false);
 
+  // Natural-language entry via the local LLM
+  const [llmReady, setLlmReady] = useState(false);
+  const [description, setDescription] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [parseNote, setParseNote] = useState("");
+
   const load = useCallback(async () => {
     const res = await fetch("/api/fare-watches");
     if (res.ok) {
       const data = await res.json();
       setWatches(data.watches);
-      setProviderConfigured(data.providerConfigured);
       setIntervalHours(data.checkIntervalHours);
     }
   }, []);
+
+  useEffect(() => {
+    fetch("/api/llm/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => setLlmReady(Boolean(s?.enabled && s?.reachable && s?.model)))
+      .catch(() => setLlmReady(false));
+  }, []);
+
+  async function handleParse() {
+    setParseNote("");
+    setError("");
+    setParsing(true);
+    const res = await fetch("/api/fare-watches/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: description }),
+    });
+    const body = await res.json().catch(() => null);
+    setParsing(false);
+    if (!res.ok || !body?.fields) {
+      setError(body?.error || "Couldn't read that description");
+      return;
+    }
+    const f = body.fields;
+    setForm((prev) => ({
+      ...prev,
+      name: f.name || prev.name,
+      origin: f.origin || prev.origin,
+      destination: f.destination || prev.destination,
+      depart_date_start: f.depart_date_start || prev.depart_date_start,
+      depart_date_end: f.depart_date_end || prev.depart_date_end,
+      return_date_start: f.return_date_start,
+      return_date_end: f.return_date_end,
+      adults: f.adults || prev.adults,
+      nonstop_only: Boolean(f.nonstop_only),
+      max_price: f.max_price ? String(f.max_price) : "",
+    }));
+    setParseNote(
+      body.missing?.length
+        ? `Filled in what I could. Please add: ${body.missing.join(", ")}.`
+        : "Filled in below. Check the details, then create the watch."
+    );
+  }
 
   useEffect(() => {
     load();
@@ -157,19 +204,12 @@ export default function FareWatchesPage() {
         </Button>
       </div>
 
-      {!providerConfigured && (
-        <div className="rounded-md bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-800">
-          <strong>Setup needed:</strong> fare watches use the free Amadeus flight-search API.
-          Create a free account at{" "}
-          <a href="https://developers.amadeus.com" target="_blank" rel="noreferrer" className="underline">
-            developers.amadeus.com
-          </a>
-          , then add <code>AMADEUS_CLIENT_ID</code> and <code>AMADEUS_CLIENT_SECRET</code> to your{" "}
-          <code>.env</code> and restart. Watches can be created now; they&apos;ll start checking
-          once the keys are set. (Note: Amadeus covers most airlines but not Southwest — Southwest
-          fares are tracked on the Flights page.)
-        </div>
-      )}
+      <div className="rounded-md bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-800">
+        <strong>Fare source offline:</strong> these watches used Amadeus&apos;s free self-service
+        flight API, which Amadeus shut down on July 17, 2026. Your watches are saved, but no prices
+        will be checked until a new fare source is added. Southwest fares on booked flights are
+        still tracked on the Flights page.
+      </div>
 
       {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
@@ -179,6 +219,36 @@ export default function FareWatchesPage() {
             <CardTitle>New Fare Watch</CardTitle>
           </CardHeader>
           <CardContent>
+            {llmReady && (
+              <div className="mb-5 rounded-md border border-blue-100 bg-blue-50/50 p-4 space-y-2">
+                <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                  <Sparkles className="h-3.5 w-3.5 text-blue-600" /> Describe the trip
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    placeholder="e.g. Mom's visit, Phoenix to Chicago the week of Nov 20, back the 30th, nonstop, under $300"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (description.trim() && !parsing) handleParse();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0 whitespace-nowrap"
+                    onClick={handleParse}
+                    disabled={parsing || !description.trim()}
+                  >
+                    {parsing ? "Reading..." : "Fill in"}
+                  </Button>
+                </div>
+                {parseNote && <p className="text-xs text-gray-600">{parseNote}</p>}
+              </div>
+            )}
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="md:col-span-3">
