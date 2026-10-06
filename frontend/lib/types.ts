@@ -15,6 +15,7 @@ export interface Account {
 export interface Reservation {
   id: string;
   account_id: string | null;
+  owner_account_id?: string | null;
   confirmation_number: string;
   first_name: string;
   last_name: string;
@@ -36,6 +37,10 @@ export interface Flight {
   checkin_result: string | null;
   checkin_attempted_at: string | null;
   created_at: string;
+  // Safety net (worker/safety_net.py)
+  readiness_status?: "ready" | "problem" | null;
+  readiness_detail?: string | null;
+  readiness_checked_at?: string | null;
   // Joined fields
   confirmation_number?: string;
   first_name?: string;
@@ -47,6 +52,9 @@ export interface NotificationConfig {
   service_url: string;
   notification_level: number;
   is_active: number;
+  label?: string;
+  // JSON array of Southwest account ids; null/empty = everyone
+  account_ids?: string | null;
 }
 
 export interface WorkerLog {

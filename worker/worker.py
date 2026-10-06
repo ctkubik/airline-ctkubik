@@ -641,7 +641,7 @@ def check_fares(conn: sqlite3.Connection) -> None:
                     try:
                         from notifications import notify_fare_drop
                         notify_msg = f"{price_str}{alt_info}"
-                        notify_fare_drop(flight_row["confirmation_number"], route, notify_msg)
+                        notify_fare_drop(flight_row["confirmation_number"], route, notify_msg, flight_id=flight_row["id"])
                     except Exception:
                         pass
                 else:
@@ -1267,9 +1267,9 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                                 try:
                                     from notifications import send_notification
                                     if confirmed:
-                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} confirmed for {route}")
+                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} confirmed for {route}", "important", flight_id=flight_id)
                                     else:
-                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} selected for {route} (not confirmed, check the Southwest app)")
+                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} selected for {route} (not confirmed, check the Southwest app)", "important", flight_id=flight_id)
                                 except Exception:
                                     pass
                         else:
@@ -1424,6 +1424,21 @@ def run_daily_cleanup(conn: sqlite3.Connection) -> None:
     last_cleanup_time = time.time()
 
 
+def run_safety_net(conn: sqlite3.Connection) -> None:
+    import safety_net
+    from notifications import send_notification
+
+    for step in (
+        lambda: safety_net.run_readiness_checks(conn, browser_session, active_handlers, send_notification, add_log),
+        lambda: safety_net.check_missed_checkins(conn, send_notification, add_log),
+    ):
+        try:
+            step()
+        except Exception as e:
+            logger.exception("Safety net check failed: %s", e)
+            add_log(conn, f"Safety net check failed: {e}", "error")
+
+
 def cleanup_handlers() -> None:
     """Remove handlers for flights that are no longer pending."""
     conn = get_db()
@@ -1436,6 +1451,13 @@ def cleanup_handlers() -> None:
                 handler = active_handlers.pop(flight_id, None)
                 if handler:
                     handler.stop_check_in()
+            elif row["checkin_status"] in ("pending", "scheduled") and not active_handlers[flight_id].is_alive():
+                # The handler's thread died without recording a result. Drop it
+                # so schedule_pending_flights schedules the check-in again;
+                # otherwise this flight would silently never be checked in.
+                active_handlers.pop(flight_id, None)
+                logger.warning("Check-in thread for flight %s stopped unexpectedly; rescheduling", flight_id)
+                add_log(conn, "Check-in thread stopped unexpectedly; rescheduling", "warning", flight_id)
     finally:
         conn.close()
 
@@ -1454,6 +1476,11 @@ def main_loop() -> None:
     if recovered:
         add_log(conn, f"Recovered {recovered} flight(s) stuck in checking_in after restart", "warning")
 
+    # Heartbeat thread: lets watchdog.py (a separate process) notice if this
+    # worker dies, and pings HEALTHCHECK_PING_URL if one is configured.
+    import safety_net
+    safety_net.start_heartbeat(get_db, shutdown_event)
+
     # Start persistent browser session
     browser_session = BrowserSession()
     try:
@@ -1469,39 +1496,38 @@ def main_loop() -> None:
         conn = None
         try:
             conn = get_db()
+            safety_net.set_state(conn, "worker_loop", "ok")
 
-            # Ensure browser is alive and session is fresh
-            browser_session.ensure_alive()
-
-            # Process accounts (login + retrieve reservations)
-            process_accounts(conn)
-
-            # Process manual reservations
-            process_manual_reservations(conn)
-
-            # Schedule check-ins for pending flights
-            schedule_pending_flights(conn)
-
-            # Check for fare drops
-            check_fares(conn)
-
-            # Check named multi-airline fare watches (no browser needed)
-            check_named_fare_watches(conn)
-
-            # Attempt seat upgrades for A-List accounts (48h before departure)
-            attempt_seat_upgrades(conn)
-
-            # Process manual seat check requests
-            process_manual_seat_checks(conn)
-
-            # Process test notification requests
-            process_test_notifications(conn)
-
-            # Daily data retention cleanup
-            run_daily_cleanup(conn)
-
-            # Clean up completed handlers
-            cleanup_handlers()
+            # Each step runs on its own: one failing (a Southwest login
+            # hiccup, a fare-check error) must not skip the others, above all
+            # scheduling check-ins and the safety net.
+            for name, step in (
+                ("browser session", browser_session.ensure_alive),
+                ("accounts", lambda: process_accounts(conn)),
+                ("manual reservations", lambda: process_manual_reservations(conn)),
+                # Drop dead check-in threads before scheduling so they're re-queued
+                ("handler cleanup", cleanup_handlers),
+                ("check-in scheduling", lambda: schedule_pending_flights(conn)),
+                # Confirm upcoming check-ins will work; alert on missed ones
+                ("safety net", lambda: run_safety_net(conn)),
+                ("fare checks", lambda: check_fares(conn)),
+                ("fare watches", lambda: check_named_fare_watches(conn)),
+                # Seat upgrades for A-List accounts (48h before departure)
+                ("seat upgrades", lambda: attempt_seat_upgrades(conn)),
+                ("manual seat checks", lambda: process_manual_seat_checks(conn)),
+                ("test notifications", lambda: process_test_notifications(conn)),
+                ("daily cleanup", lambda: run_daily_cleanup(conn)),
+            ):
+                if shutdown_event.is_set():
+                    break
+                try:
+                    step()
+                except Exception as e:
+                    logger.exception("Error in %s: %s", name, e)
+                    try:
+                        add_log(conn, f"Worker error in {name}: {e}", "error")
+                    except Exception:
+                        pass
         except Exception as e:
             logger.exception("Error in main loop: %s", e)
             try:

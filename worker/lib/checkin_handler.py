@@ -68,6 +68,10 @@ class CheckInHandler:
         self._thread = threading.Thread(target=self._set_check_in, daemon=True)
         self._thread.start()
 
+    def is_alive(self) -> bool:
+        """Whether the check-in thread is still running (waiting or checking in)."""
+        return bool(self._thread and self._thread.is_alive())
+
     def stop_check_in(self) -> None:
         logger.debug("Stopping check-in for flight %s", self.flight_db_id)
         self._stop_event.set()
@@ -81,9 +85,9 @@ class CheckInHandler:
             route = f"{self.departure_airport} -> {self.destination_airport}"
             passenger = f"{self.first_name} {self.last_name}"
             if success:
-                notify_checkin_success(self.confirmation_number, route, passenger)
+                notify_checkin_success(self.confirmation_number, route, passenger, flight_id=self.flight_db_id)
             else:
-                notify_checkin_failed(self.confirmation_number, route, passenger, error)
+                notify_checkin_failed(self.confirmation_number, route, passenger, error, flight_id=self.flight_db_id)
         except Exception as e:
             logger.error("Failed to send notification: %s", e)
 

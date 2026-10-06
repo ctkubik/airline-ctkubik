@@ -31,7 +31,24 @@ export function GET() {
     .prepare("SELECT * FROM worker_logs ORDER BY created_at DESC LIMIT 20")
     .all();
 
+  // Safety net: the worker writes heartbeats (see worker/safety_net.py)
+  const state = (key: string) =>
+    db.prepare("SELECT updated_at FROM system_state WHERE key = ?").get(key) as { updated_at: string } | undefined;
+  const ageMinutes = (row?: { updated_at: string }) =>
+    row ? (Date.now() - new Date(row.updated_at.replace(" ", "T") + "Z").getTime()) / 60000 : null;
+  const aliveAge = ageMinutes(state("worker_alive"));
+  const loopAge = ageMinutes(state("worker_loop"));
+  let workerProblem: string | null = null;
+  if (aliveAge === null) workerProblem = "The check-in worker hasn't started yet.";
+  else if (aliveAge > 5) workerProblem = `The check-in worker stopped ${Math.round(aliveAge)} minutes ago.`;
+  else if (loopAge !== null && loopAge > 45) workerProblem = `The check-in worker has been stuck for ${Math.round(loopAge)} minutes.`;
+
   return NextResponse.json({
+    system: {
+      worker_alive_minutes_ago: aliveAge,
+      worker_loop_minutes_ago: loopAge,
+      problem: workerProblem,
+    },
     stats: {
       active_accounts: activeAccounts,
       total_reservations: totalReservations,

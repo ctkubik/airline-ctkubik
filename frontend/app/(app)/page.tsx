@@ -4,13 +4,14 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/flights/status-badge";
 import { CountdownTimer } from "@/components/flights/countdown-timer";
-import { Users, CalendarCheck, Plane, CheckCircle, XCircle } from "lucide-react";
+import { Users, CalendarCheck, Plane, CheckCircle, XCircle, AlertTriangle, ShieldCheck } from "lucide-react";
 import type { DashboardStats, Flight, WorkerLog } from "@/lib/types";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [upcomingFlights, setUpcomingFlights] = useState<Flight[]>([]);
   const [recentLogs, setRecentLogs] = useState<WorkerLog[]>([]);
+  const [systemProblem, setSystemProblem] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDashboard();
@@ -37,11 +38,23 @@ export default function DashboardPage() {
     setStats(data.stats);
     setUpcomingFlights(data.upcoming_flights);
     setRecentLogs(data.recent_logs);
+    setSystemProblem(data.system?.problem ?? null);
   }
 
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+
+      {systemProblem && (
+        <div className="flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+          <div>
+            <strong>{systemProblem}</strong> Check-ins won&apos;t happen until it&apos;s running again. It
+            restarts by itself; if this stays for more than a few minutes, restart the Mac (or run{" "}
+            <code>./macos/ctl.sh restart</code>).
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard icon={Users} label="Active Accounts" value={stats?.active_accounts ?? 0} color="blue" />
@@ -73,8 +86,12 @@ export default function DashboardPage() {
                       {flight.confirmation_number} &middot; {flight.departure_airport} &rarr;{" "}
                       {flight.destination_airport}
                     </div>
+                    {flight.readiness_status === "problem" && flight.readiness_detail && (
+                      <div className="mt-1 text-xs text-red-700">{flight.readiness_detail}</div>
+                    )}
                   </div>
                   <div className="flex items-center gap-4">
+                    <ReadinessBadge flight={flight} />
                     <StatusBadge status={flight.checkin_status} />
                     <CountdownTimer departureTime={flight.departure_time} status={flight.checkin_status} />
                   </div>
@@ -114,6 +131,36 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// Result of the safety net's last pre-check-in check (worker/safety_net.py),
+// which runs in the 3 hours before each check-in.
+function ReadinessBadge({ flight }: { flight: Flight }) {
+  if (!flight.readiness_status) return null;
+  const checked = flight.readiness_checked_at
+    ? new Date(flight.readiness_checked_at.replace(" ", "T") + "Z").toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "";
+  if (flight.readiness_status === "ready") {
+    return (
+      <span
+        className="flex items-center gap-1 text-xs text-green-700"
+        title={`${flight.readiness_detail ?? ""} Checked ${checked}.`}
+      >
+        <ShieldCheck className="h-3.5 w-3.5" /> Ready
+      </span>
+    );
+  }
+  return (
+    <span
+      className="flex items-center gap-1 rounded bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700"
+      title={`${flight.readiness_detail ?? ""} Checked ${checked}.`}
+    >
+      <AlertTriangle className="h-3.5 w-3.5" /> At risk
+    </span>
   );
 }
 

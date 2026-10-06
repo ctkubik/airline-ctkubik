@@ -158,6 +158,11 @@ def _init_tables(conn: sqlite3.Connection) -> None:
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS system_state (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS fare_watch_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             watch_id TEXT NOT NULL,
@@ -217,6 +222,30 @@ def _migrate(conn: sqlite3.Connection) -> None:
     sp_cols = [row[1] for row in conn.execute("PRAGMA table_info(seat_preferences)").fetchall()]
     if sp_cols and "fare_check_mode" not in sp_cols:
         conn.execute("ALTER TABLE seat_preferences ADD COLUMN fare_check_mode TEXT DEFAULT 'same_day_nonstop'")
+
+    # Safety net: pre-check-in readiness results and alert de-duplication
+    flight_cols = [row[1] for row in conn.execute("PRAGMA table_info(flights)").fetchall()]
+    for col, ddl in (
+        ("readiness_status", "readiness_status TEXT"),
+        ("readiness_detail", "readiness_detail TEXT"),
+        ("readiness_checked_at", "readiness_checked_at TEXT"),
+        ("readiness_failures", "readiness_failures INTEGER DEFAULT 0"),
+        ("readiness_alerted", "readiness_alerted INTEGER DEFAULT 0"),
+        ("missed_alerted", "missed_alerted INTEGER DEFAULT 0"),
+    ):
+        if col not in flight_cols:
+            conn.execute(f"ALTER TABLE flights ADD COLUMN {ddl}")
+
+    # Per-person alerts: who a notification service belongs to, and whose
+    # trip a manually added reservation is
+    nc_cols = [row[1] for row in conn.execute("PRAGMA table_info(notification_configs)").fetchall()]
+    if nc_cols and "label" not in nc_cols:
+        conn.execute("ALTER TABLE notification_configs ADD COLUMN label TEXT DEFAULT ''")
+    if nc_cols and "account_ids" not in nc_cols:
+        conn.execute("ALTER TABLE notification_configs ADD COLUMN account_ids TEXT")
+    res_cols = [row[1] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()]
+    if res_cols and "owner_account_id" not in res_cols:
+        conn.execute("ALTER TABLE reservations ADD COLUMN owner_account_id TEXT")
 
     # Plain-English explanation of a diagnostic, written by the local LLM
     diag_cols = [row[1] for row in conn.execute("PRAGMA table_info(diagnostics)").fetchall()]

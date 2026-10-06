@@ -58,7 +58,7 @@ export function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { confirmation_number, first_name, last_name } = await req.json();
+  const { confirmation_number, first_name, last_name, owner_account_id } = await req.json();
   if (!confirmation_number || !first_name || !last_name) {
     return NextResponse.json(
       { error: "Confirmation number, first name, and last name required" },
@@ -67,9 +67,16 @@ export async function POST(req: NextRequest) {
   }
   const db = getDb();
   const id = crypto.randomUUID();
+  // owner_account_id: whose trip this is, so alerts reach that person
   db.prepare(
-    "INSERT INTO reservations (id, confirmation_number, first_name, last_name) VALUES (?, ?, ?, ?)"
-  ).run(id, confirmation_number.toUpperCase(), first_name, last_name);
+    "INSERT INTO reservations (id, confirmation_number, first_name, last_name, owner_account_id) VALUES (?, ?, ?, ?, ?)"
+  ).run(
+    id,
+    confirmation_number.toUpperCase().trim(),
+    first_name.trim(),
+    last_name.trim(),
+    typeof owner_account_id === "string" && owner_account_id ? owner_account_id : null
+  );
   const reservation = db.prepare("SELECT * FROM reservations WHERE id = ?").get(id);
   return NextResponse.json(reservation, { status: 201 });
 }

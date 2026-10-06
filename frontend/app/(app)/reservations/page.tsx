@@ -25,10 +25,25 @@ export default function ReservationsPage() {
   const [lastName, setLastName] = useState("");
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [ownerId, setOwnerId] = useState("");
+  const [accounts, setAccounts] = useState<{ id: string; display_name: string; username: string }[]>([]);
 
   useEffect(() => {
     fetchReservations();
+    fetch("/api/accounts")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setAccounts)
+      .catch(() => setAccounts([]));
   }, []);
+
+  async function setOwner(reservationId: string, accountId: string) {
+    await fetch(`/api/reservations/${reservationId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner_account_id: accountId }),
+    });
+    fetchReservations();
+  }
 
   async function fetchReservations() {
     const res = await fetch("/api/reservations");
@@ -45,8 +60,10 @@ export default function ReservationsPage() {
         confirmation_number: confirmationNumber,
         first_name: firstName,
         last_name: lastName,
+        owner_account_id: ownerId,
       }),
     });
+    setOwnerId("");
     setConfirmationNumber("");
     setFirstName("");
     setLastName("");
@@ -113,6 +130,26 @@ export default function ReservationsPage() {
                   required
                 />
               </div>
+              {accounts.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Whose trip?</label>
+                  <select
+                    value={ownerId}
+                    onChange={(e) => setOwnerId(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Not assigned (alerts go to everyone)</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.display_name || a.username}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Check-in and fare alerts go to the notification services set up for this person.
+                  </p>
+                </div>
+              )}
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Adding..." : "Add Reservation"}
               </Button>
@@ -170,6 +207,23 @@ export default function ReservationsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {!res.account_id && accounts.length > 0 && (
+                        <select
+                          value={res.owner_account_id || ""}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setOwner(res.id, e.target.value)}
+                          className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+                          aria-label="Whose trip"
+                          title="Whose trip (who gets the alerts)"
+                        >
+                          <option value="">Alerts: everyone</option>
+                          {accounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              Alerts: {a.display_name || a.username}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <Badge variant={res.is_active ? "active" : "inactive"}>
                         {res.is_active ? "Active" : "Inactive"}
                       </Badge>

@@ -9,10 +9,42 @@ import type { NotificationConfig } from "@/lib/types";
 
 const ALL_SEAT_LETTERS = ["A", "B", "C", "D", "E", "F"];
 
+// Matches worker/notifications.py: which alerts a service receives
+const LEVELS = [
+  { value: 1, label: "Everything" },
+  { value: 2, label: "Important only" },
+  { value: 3, label: "Problems only" },
+];
+const LEVEL_HELP =
+  "Everything: check-ins, seat changes, fare drops and problems. Important only: everything except routine successful check-ins. Problems only: failed or missed check-ins, safety-net warnings, and the app being down.";
+
+interface AccountOption {
+  id: string;
+  display_name: string;
+  username: string;
+}
+
+function accountName(a: AccountOption): string {
+  return a.display_name || a.username;
+}
+
+// account_ids is a JSON list; the UI picks one person or everyone
+function whoValue(accountIds?: string | null): string {
+  try {
+    const ids = JSON.parse(accountIds || "null");
+    return Array.isArray(ids) && ids.length ? ids[0] : "";
+  } catch {
+    return "";
+  }
+}
+
 export default function SettingsPage() {
   const [notifications, setNotifications] = useState<NotificationConfig[]>([]);
   const [serviceUrl, setServiceUrl] = useState("");
   const [notificationLevel, setNotificationLevel] = useState(1);
+  const [serviceLabel, setServiceLabel] = useState("");
+  const [serviceWho, setServiceWho] = useState("");
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
@@ -44,6 +76,10 @@ export default function SettingsPage() {
     fetchNotifications();
     fetchPreferences();
     fetchLlmStatus();
+    fetch("/api/accounts")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setAccounts)
+      .catch(() => setAccounts([]));
   }, []);
 
   async function fetchLlmStatus() {
@@ -77,11 +113,27 @@ export default function SettingsPage() {
     await fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ service_url: serviceUrl, notification_level: notificationLevel }),
+      body: JSON.stringify({
+        service_url: serviceUrl,
+        notification_level: notificationLevel,
+        label: serviceLabel,
+        account_ids: serviceWho ? [serviceWho] : null,
+      }),
     });
     setServiceUrl("");
+    setServiceLabel("");
+    setServiceWho("");
     setNotificationLevel(1);
     setLoading(false);
+    fetchNotifications();
+  }
+
+  async function updateNotification(id: string, patch: Record<string, unknown>) {
+    await fetch(`/api/notifications/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
     fetchNotifications();
   }
 
@@ -128,7 +180,11 @@ export default function SettingsPage() {
     await fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ service_url: url, notification_level: 1 }),
+      body: JSON.stringify({
+        service_url: url,
+        notification_level: 1,
+        label: `Text to ${twilioTo}`,
+      }),
     });
     setTwilioSid("");
     setTwilioToken("");
@@ -357,28 +413,55 @@ export default function SettingsPage() {
             <code className="bg-gray-100 px-1 rounded text-xs">discord://WebhookID/WebhookToken</code>
           </p>
 
-          <form onSubmit={addNotification} className="flex gap-2">
-            <Input
-              value={serviceUrl}
-              onChange={(e) => setServiceUrl(e.target.value)}
-              placeholder="Apprise notification URL"
-              className="flex-1"
-              required
-            />
-            <select
-              value={notificationLevel}
-              onChange={(e) => setNotificationLevel(Number(e.target.value))}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value={1}>Level 1 (All)</option>
-              <option value={2}>Level 2</option>
-              <option value={3}>Level 3</option>
-              <option value={4}>Level 4</option>
-              <option value={5}>Level 5 (Critical only)</option>
-            </select>
-            <Button type="submit" disabled={loading}>
-              <Plus className="mr-1 h-4 w-4" /> Add
-            </Button>
+          <form onSubmit={addNotification} className="space-y-2">
+            <div className="flex flex-col gap-2 md:flex-row">
+              <Input
+                value={serviceUrl}
+                onChange={(e) => setServiceUrl(e.target.value)}
+                placeholder="Apprise notification URL"
+                className="flex-1"
+                required
+              />
+              <Input
+                value={serviceLabel}
+                onChange={(e) => setServiceLabel(e.target.value)}
+                placeholder="Name, e.g. Mom's phone"
+                className="md:w-48"
+              />
+            </div>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <select
+                value={serviceWho}
+                onChange={(e) => setServiceWho(e.target.value)}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                aria-label="Whose alerts"
+              >
+                <option value="">Alerts for everyone&apos;s trips</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    Only {accountName(a)}&apos;s trips
+                  </option>
+                ))}
+              </select>
+              <select
+                value={notificationLevel}
+                onChange={(e) => setNotificationLevel(Number(e.target.value))}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                aria-label="Which alerts"
+              >
+                {LEVELS.map((l) => (
+                  <option key={l.value} value={l.value}>
+                    {l.label}
+                  </option>
+                ))}
+              </select>
+              <Button type="submit" disabled={loading}>
+                <Plus className="mr-1 h-4 w-4" /> Add
+              </Button>
+            </div>
+            <p className="text-xs text-gray-400">
+              {LEVEL_HELP} Warnings that the app itself is down always go to every service.
+            </p>
           </form>
 
           {notifications.length > 0 && (
@@ -387,15 +470,51 @@ export default function SettingsPage() {
                 {notifications.map((n) => (
                   <div
                     key={n.id}
-                    className="flex items-center justify-between rounded-lg border border-gray-200 p-3"
+                    className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3 md:flex-row md:items-center md:justify-between"
                   >
-                    <div>
-                      <code className="text-sm bg-gray-50 px-2 py-0.5 rounded">{n.service_url}</code>
-                      <span className="ml-2 text-xs text-gray-400">Level {n.notification_level}</span>
+                    <div className="min-w-0">
+                      <Input
+                        defaultValue={n.label || ""}
+                        placeholder="Add a name"
+                        className="h-8 w-48 text-sm"
+                        onBlur={(e) => {
+                          if (e.target.value !== (n.label || "")) updateNotification(n.id, { label: e.target.value });
+                        }}
+                      />
+                      <code className="mt-1 block text-xs text-gray-400">{n.service_url}</code>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => deleteNotification(n.id)}>
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={whoValue(n.account_ids)}
+                        onChange={(e) =>
+                          updateNotification(n.id, { account_ids: e.target.value ? [e.target.value] : null })
+                        }
+                        className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+                        aria-label="Whose alerts"
+                      >
+                        <option value="">Everyone&apos;s trips</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            Only {accountName(a)}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={Math.min(Math.max(n.notification_level, 1), 3)}
+                        onChange={(e) => updateNotification(n.id, { notification_level: Number(e.target.value) })}
+                        className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+                        aria-label="Which alerts"
+                      >
+                        {LEVELS.map((l) => (
+                          <option key={l.value} value={l.value}>
+                            {l.label}
+                          </option>
+                        ))}
+                      </select>
+                      <Button variant="ghost" size="icon" onClick={() => deleteNotification(n.id)}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>

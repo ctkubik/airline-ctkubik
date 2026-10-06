@@ -3,6 +3,7 @@
 # install.sh); you normally don't call it yourself.
 #   macos/run.sh web     - the Next.js dashboard on port 3000
 #   macos/run.sh worker  - the Python check-in worker
+#   macos/run.sh watchdog - one watchdog check (alerts if the worker died)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -59,8 +60,13 @@ case "${1:-}" in
         # check-in scheduled for 3am isn't missed because the Mac slept.
         exec /usr/bin/caffeinate -i -s "$REPO/.venv/bin/python" -u worker.py
         ;;
+    watchdog)
+        # Runs once per launch; launchd starts it every 5 minutes.
+        cd "$REPO/worker"
+        exec "$REPO/.venv/bin/python" -u watchdog.py
+        ;;
     *)
-        echo "usage: $0 web|worker" >&2
+        echo "usage: $0 web|worker|watchdog" >&2
         exit 64
         ;;
 esac

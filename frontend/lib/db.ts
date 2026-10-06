@@ -186,6 +186,12 @@ function initTables(db: Database.Database) {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS system_state (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS fare_watch_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       watch_id TEXT NOT NULL,
@@ -231,4 +237,15 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("seat_preferences", "fare_check_mode", "fare_check_mode TEXT DEFAULT 'same_day_nonstop'");
 
   addColumnIfMissing("diagnostics", "ai_explanation", "ai_explanation TEXT");
+
+  addColumnIfMissing("flights", "readiness_status", "readiness_status TEXT");
+  addColumnIfMissing("flights", "readiness_detail", "readiness_detail TEXT");
+  addColumnIfMissing("flights", "readiness_checked_at", "readiness_checked_at TEXT");
+  addColumnIfMissing("flights", "readiness_failures", "readiness_failures INTEGER DEFAULT 0");
+  addColumnIfMissing("flights", "readiness_alerted", "readiness_alerted INTEGER DEFAULT 0");
+  addColumnIfMissing("flights", "missed_alerted", "missed_alerted INTEGER DEFAULT 0");
+
+  addColumnIfMissing("notification_configs", "label", "label TEXT DEFAULT ''");
+  addColumnIfMissing("notification_configs", "account_ids", "account_ids TEXT");
+  addColumnIfMissing("reservations", "owner_account_id", "owner_account_id TEXT");
 }

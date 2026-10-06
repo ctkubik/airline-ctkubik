@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-LABELS=("com.airline-checkin.web" "com.airline-checkin.worker")
+LABELS=("com.airline-checkin.web" "com.airline-checkin.worker" "com.airline-checkin.watchdog")
 AGENTS_DIR="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
 
@@ -83,7 +83,7 @@ case "${1:-status}" in
     stop) stop ;;
     restart) restart ;;
     status) status ;;
-    logs) tail -n 50 -F "$DATA_DIR/logs/web.log" "$DATA_DIR/logs/worker.log" ;;
+    logs) tail -n 50 -F "$DATA_DIR/logs/web.log" "$DATA_DIR/logs/worker.log" "$DATA_DIR/logs/watchdog.log" ;;
     *)
         echo "usage: $0 status|start|stop|restart|logs" >&2
         exit 64

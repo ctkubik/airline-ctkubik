@@ -325,10 +325,11 @@ write_agent() {  # write_agent NAME
     <string>$(xml_escape "$REPO")</string>
     <key>RunAtLoad</key>
     <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
+$(if [ "$1" = "watchdog" ]; then
+    printf '    <key>StartInterval</key>\n    <integer>300</integer>\n'
+else
+    printf '    <key>KeepAlive</key>\n    <true/>\n    <key>ThrottleInterval</key>\n    <integer>10</integer>\n'
+fi)
     <!-- Interactive = macOS won't throttle or App Nap the service -->
     <key>ProcessType</key>
     <string>Interactive</string>
@@ -361,6 +362,7 @@ restart_agent() {  # restart_agent LABEL PLIST
 }
 write_agent web
 write_agent worker
+write_agent watchdog
 
 step "Waiting for the dashboard to come up"
 healthy=""
