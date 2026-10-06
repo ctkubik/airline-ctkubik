@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import type { Reservation } from "@/lib/types";
+import { EmailImport } from "@/components/reservations/email-import";
 
 export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -89,6 +90,8 @@ export default function ReservationsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Reservations</h1>
+        <div className="flex gap-2">
+        <EmailImport accounts={accounts} onAdded={fetchReservations} />
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -156,6 +159,7 @@ export default function ReservationsPage() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <Card>
