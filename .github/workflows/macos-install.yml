@@ -43,6 +43,8 @@ jobs:
           echo "uname -m: $(uname -m)  |  arm64 hardware: $(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)"
           sysctl -n machdep.cpu.brand_string
           file "$AIRLINE_HOME/runtime/python/bin/python3.13" "$AIRLINE_HOME/runtime/node/bin/node"
+          # The undetected Chrome driver is an Intel build; Apple Silicon needs Rosetta
+          if [ "$(uname -m)" = arm64 ]; then arch -x86_64 /usr/bin/true && echo "Rosetta: available"; fi
       - name: Services are running and the dashboard answers
         run: |
           "$AIRLINE_HOME/macos/ctl.sh" status

@@ -47,8 +47,9 @@ You don't need Homebrew, git, or admin rights. The installer:
 4. Turns on the local AI features if LM Studio is installed
 5. Starts the two background services and adds **Airline Check-In** to your Applications folder,
    which opens the dashboard
-6. Asks for your Mac password once, in a normal macOS dialog, to stop the Mac from sleeping and to
-   turn it back on after a power cut (you can click Cancel)
+6. Asks for your Mac password once, in a normal macOS dialog, to install Rosetta (Apple's
+   built-in Intel translator, which the automated Chrome browser needs on Apple Silicon Macs), stop
+   the Mac from sleeping, and turn it back on after a power cut. It only asks for what's missing.
 7. Offers to open the automatic-login setting (see below), then shows your username and password
    with a **Copy Password** button and opens the dashboard
 
@@ -176,7 +177,9 @@ iCloud Drive. Move it to your home folder and run the installer again.
 haven't set `BROWSER_MODE=headless`. Open the Activity page, and with local AI on, click
 **Explain this** on the diagnostic.
 
-**Chrome won't start / driver errors.** Open Chrome once by hand so macOS finishes setting it up,
+**Chrome won't start / "Bad CPU type" in the worker log.** On Apple Silicon the automated browser
+needs Rosetta. Run the installer again and enter your password, or run
+`softwareupdate --install-rosetta` in Terminal. Otherwise, open Chrome once by hand so macOS finishes setting it up,
 update Chrome (Chrome menu > About Google Chrome), then `./macos/ctl.sh restart`. The worker
 downloads a matching driver automatically.
 

@@ -181,6 +181,50 @@ else
     echo "Installed to $CHROME_APP"
 fi
 
+# ── Mac settings that need an admin password (asked for once) ──────────
+step "Mac settings"
+# Rosetta: SeleniumBase's undetected Chrome driver is an Intel build even on
+# Apple Silicon, so it needs Rosetta. Without it, macOS shows an "install
+# Rosetta?" prompt that nobody is there to click, and the browser never starts.
+needs_rosetta=""
+if [ "$(uname -m)" = "arm64" ] && ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+    needs_rosetta=1
+fi
+power_ok() {
+    pmset -g | awk '$1 == "sleep" && $2 == "0" {s=1} $1 == "autorestart" && $2 == "1" {a=1} END {exit !(s && a)}'
+}
+admin_cmd=""
+admin_reasons=""
+if [ -n "$needs_rosetta" ]; then
+    admin_cmd="softwareupdate --install-rosetta --agree-to-license"
+    admin_reasons="install Rosetta, which the automated Chrome browser needs on this Mac"
+fi
+if ! power_ok; then
+    admin_cmd="${admin_cmd:+$admin_cmd; }pmset -a sleep 0 disksleep 0 autorestart 1 womp 1"
+    admin_reasons="${admin_reasons:+$admin_reasons, and }stop the Mac from sleeping and restart it after a power cut so it never misses a check-in"
+fi
+if [ -z "$admin_cmd" ]; then
+    echo "Rosetta, sleep and power-cut restart settings are already in place."
+elif [ -n "$NONINTERACTIVE" ]; then
+    sudo -n /bin/sh -c "$admin_cmd" >/dev/null 2>&1 || warn "Skipped admin settings (non-interactive): $admin_cmd"
+else
+    if osascript -e "do shell script \"$admin_cmd\" with prompt \"Airline Check-In needs your password to $admin_reasons.\" with administrator privileges" >/dev/null 2>&1; then
+        echo "Mac settings applied."
+    else
+        warn "Mac settings skipped (password dialog cancelled)."
+    fi
+fi
+if [ -n "$needs_rosetta" ] && ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+    warn "Rosetta isn't installed, so the automated browser can't start and check-ins will fail."
+    dialog "Rosetta isn't installed.
+
+The automated Chrome browser this app uses needs Rosetta on Apple Silicon Macs. Without it, check-ins will fail.
+
+Run the installer again and enter your password when asked, or install Rosetta from Terminal with:
+softwareupdate --install-rosetta" "OK" >/dev/null
+fi
+power_ok || warn "Sleep settings unchanged. The worker still keeps the Mac awake while it runs."
+
 # ── 2. Worker and dashboard ──────────────────────────────────────────────
 step "Setting up the Python worker"
 # Rebuild the virtual environment if it was made with a different Python
@@ -335,21 +379,8 @@ rm -rf "$LAUNCHER"
 osacompile -o "$LAUNCHER" -e "open location \"http://localhost:$PORT\"" >/dev/null
 echo "  $LAUNCHER"
 
-# ── 6. Keep the Mac awake and able to restart unattended ─────────────────
-step "Power and login settings"
-power_ok() {
-    pmset -g | awk '$1 == "sleep" && $2 == "0" {s=1} $1 == "autorestart" && $2 == "1" {a=1} END {exit !(s && a)}'
-}
-if power_ok; then
-    echo "Sleep is off and restart-after-power-cut is on."
-elif [ -z "$NONINTERACTIVE" ]; then
-    if osascript -e 'do shell script "pmset -a sleep 0 disksleep 0 autorestart 1 womp 1" with prompt "Airline Check-In wants to stop this Mac from sleeping and have it restart after a power cut, so it never misses a check-in." with administrator privileges' >/dev/null 2>&1; then
-        echo "Power settings applied."
-    else
-        warn "Power settings skipped. The worker still keeps the Mac awake while it runs."
-    fi
-fi
-
+# ── 6. Automatic login ───────────────────────────────────────────────────
+step "Login settings"
 AUTOLOGIN_USER="$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null || true)"
 if [ "$AUTOLOGIN_USER" = "$(id -un)" ]; then
     echo "Automatic login is on."
