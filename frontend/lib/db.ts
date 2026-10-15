@@ -262,6 +262,12 @@ function initTables(db: Database.Database) {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_by TEXT DEFAULT '',
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
     CREATE TABLE IF NOT EXISTS trip_price_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       trip_id TEXT NOT NULL,

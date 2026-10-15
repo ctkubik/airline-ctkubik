@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getSetting, settingNumber } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -16,14 +17,14 @@ export function GET() {
   };
   return NextResponse.json({
     flight_status: {
-      configured: Boolean(process.env.AERODATABOX_API_KEY?.trim()),
+      configured: Boolean(getSetting("AERODATABOX_API_KEY")),
       used: used("aerodatabox_lookups"),
-      limit: Number(process.env.FLIGHT_STATUS_MONTHLY_LIMIT || 550),
+      limit: settingNumber("FLIGHT_STATUS_MONTHLY_LIMIT"),
     },
     google_flights: {
-      configured: Boolean(process.env.SERPAPI_API_KEY?.trim()),
+      configured: Boolean(getSetting("SERPAPI_API_KEY")),
       used: used("serpapi_searches"),
-      limit: Number(process.env.SERPAPI_MONTHLY_LIMIT || 240),
+      limit: settingNumber("SERPAPI_MONTHLY_LIMIT"),
     },
   });
 }

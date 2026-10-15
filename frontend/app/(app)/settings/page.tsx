@@ -1,25 +1,15 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Trash2, Plus, Save, MessageSquare, Sparkles, RefreshCw, CalendarDays } from "lucide-react";
+import { Trash2, Plus, Save, MessageSquare, CalendarDays } from "lucide-react";
 import type { NotificationConfig } from "@/lib/types";
 
 const ALL_SEAT_LETTERS = ["A", "B", "C", "D", "E", "F"];
-
-interface ServiceInfo {
-  configured: boolean;
-  used: number;
-  limit: number;
-}
-
-interface ServicesStatus {
-  flight_status: ServiceInfo;
-  google_flights: ServiceInfo;
-}
 
 // Matches worker/notifications.py: which alerts a service receives
 const LEVELS = [
@@ -76,17 +66,8 @@ export default function SettingsPage() {
   const [pickAtCheckin, setPickAtCheckin] = useState(false);
   const [avoidRows, setAvoidRows] = useState("");
   const [minRowGain, setMinRowGain] = useState("0");
-  const [services, setServices] = useState<ServicesStatus | null>(null);
 
   // Local LLM (LM Studio) connection status
-  const [llm, setLlm] = useState<{
-    enabled: boolean;
-    baseUrl: string;
-    reachable: boolean;
-    model: string | null;
-    error?: string;
-  } | null>(null);
-  const [llmChecking, setLlmChecking] = useState(false);
 
   // Calendar feed subscription link
   const [calendarToken, setCalendarToken] = useState<string | null>(null);
@@ -99,8 +80,6 @@ export default function SettingsPage() {
   useEffect(() => {
     fetchNotifications();
     fetchPreferences();
-    fetchLlmStatus();
-    fetchServices();
     fetch("/api/calendar/link")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setCalendarToken(d?.token ?? null))
@@ -110,17 +89,6 @@ export default function SettingsPage() {
       .then(setAccounts)
       .catch(() => setAccounts([]));
   }, []);
-
-  async function fetchLlmStatus() {
-    setLlmChecking(true);
-    try {
-      const res = await fetch("/api/llm/status");
-      setLlm(res.ok ? await res.json() : null);
-    } catch {
-      setLlm(null);
-    }
-    setLlmChecking(false);
-  }
 
   async function fetchNotifications() {
     const res = await fetch("/api/notifications");
@@ -139,10 +107,6 @@ export default function SettingsPage() {
     setMinRowGain(String(data.min_row_gain ?? 0));
   }
 
-  async function fetchServices() {
-    const res = await fetch("/api/services/status");
-    if (res.ok) setServices(await res.json());
-  }
 
   async function addNotification(e: React.FormEvent) {
     e.preventDefault();
@@ -663,90 +627,19 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Flight data services */}
+      {/* API keys and LM Studio live on their own page */}
       <Card>
         <CardHeader>
-          <CardTitle>Flight Data Services</CardTitle>
+          <CardTitle>API Connections</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4 text-sm">
-          {[
-            {
-              key: "flight_status" as const,
-              name: "Flight status (AeroDataBox)",
-              what: "Delay, gate change and cancellation alerts for Southwest and other-airline flights.",
-              env: "AERODATABOX_API_KEY",
-              how: "Sign up at rapidapi.com, subscribe to AeroDataBox on the free Basic plan, and copy your RapidAPI key.",
-              unit: "lookups",
-            },
-            {
-              key: "google_flights" as const,
-              name: "Prices on every airline (Google Flights via SerpApi)",
-              what: "Fare watches on all airlines, and price-drop alerts for trips you booked on other airlines.",
-              env: "SERPAPI_API_KEY",
-              how: "Sign up at serpapi.com (free plan: 250 searches a month) and copy your API key.",
-              unit: "searches",
-            },
-          ].map((svc) => {
-            const info = services?.[svc.key];
-            return (
-              <div key={svc.key} className="rounded-lg border border-gray-200 p-3 space-y-1">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium text-gray-900">{svc.name}</span>
-                  {info?.configured ? (
-                    <Badge variant="success">
-                      On · {info.used} of {info.limit} {svc.unit} this month
-                    </Badge>
-                  ) : (
-                    <Badge variant="inactive">Not set up</Badge>
-                  )}
-                </div>
-                <p className="text-gray-600">{svc.what}</p>
-                {!info?.configured && (
-                  <p className="text-xs text-gray-500">
-                    {svc.how} Add <code>{svc.env}=your-key</code> to the <code>.env</code> file in the app folder, then
-                    restart (<code>./macos/ctl.sh restart</code> on the Mac).
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      {/* Local AI */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" /> Local AI (LM Studio)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p className="text-gray-600">
-            An optional model running on this machine. It explains errors on the Diagnostics tab, fills in
-            fare watches from a sentence, and helps the seat-upgrade automation when Southwest changes its
-            website. Check-ins never depend on it.
-          </p>
-          {llm === null ? (
-            <p className="text-gray-500">Checking...</p>
-          ) : !llm.enabled ? (
-            <p className="text-gray-700">
-              <span className="font-medium">Off.</span> To turn it on, set <code>LLM_ENABLED=true</code> in{" "}
-              <code>.env</code>, start LM Studio&apos;s local server with a model loaded, and restart the app.
-            </p>
-          ) : llm.reachable && llm.model ? (
-            <p className="text-green-700">
-              <span className="font-medium">Connected</span> to {llm.baseUrl} using <code>{llm.model}</code>.
-            </p>
-          ) : (
-            <p className="text-red-700">
-              <span className="font-medium">Not reachable</span> at {llm.baseUrl}
-              {llm.error ? `: ${llm.error}` : ""}. Open LM Studio, load a model, and start the server
-              (Developer tab).
-            </p>
-          )}
-          <Button variant="outline" size="sm" onClick={fetchLlmStatus} disabled={llmChecking}>
-            <RefreshCw className={`h-3.5 w-3.5 mr-1 ${llmChecking ? "animate-spin" : ""}`} /> Check again
-          </Button>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+          <span>
+            Local AI (LM Studio), flight status alerts and Google Flights prices are set up on the API Connections page,
+            with step-by-step instructions and a test button for each.
+          </span>
+          <Link href="/connections">
+            <Button variant="outline">Open API Connections</Button>
+          </Link>
         </CardContent>
       </Card>
     </div>

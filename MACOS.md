@@ -123,13 +123,13 @@ Set it up:
 3. In LM Studio's **Developer** tab, start the server (port 1234). In LM Studio's settings, turn on
    running the server when LM Studio starts, and add LM Studio to **System Settings > General >
    Login Items** so it comes back after a restart.
-4. Run the installer again (double-click **Install on Mac.command**). It sees LM Studio and turns the
-   features on. If you installed LM Studio first, this already happened.
-5. In the dashboard, **Settings > Local AI** should say **Connected**.
+4. In the dashboard, open **API Connections**. In the Local AI card, click **Test connection**, pick
+   the model, check **Use local AI**, and click **Save**. (If LM Studio was installed before the app,
+   the installer already turned it on.)
+5. The card should say **Connected**.
 
-By default the app uses the first chat model LM Studio has. To pin one, add
-`LLM_MODEL=<model identifier from LM Studio>` to `.env` in `~/airline-ctkubik`, then run
-`./macos/ctl.sh restart`.
+By default the app uses the first chat model LM Studio has. To pin one, pick it in the **Model**
+box on the API Connections page.
 
 If LM Studio is closed or the model is slow, the app carries on without it.
 
@@ -206,5 +206,5 @@ downloads a matching driver automatically.
 **Nothing runs after a restart.** Automatic login isn't on (see [Make the Mac start up on its own](#make-the-mac-start-up-on-its-own)), so the services are waiting
 for someone to log in.
 
-**Local AI says "Not reachable".** LM Studio isn't running, its server isn't started, or no model is
+**Local AI test says "Nothing answered".** LM Studio isn't running, its server isn't started, or no model is
 loaded. Check the Developer tab in LM Studio.

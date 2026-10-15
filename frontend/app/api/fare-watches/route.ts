@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getDb } from "@/lib/db";
+import { getSetting } from "@/lib/settings";
 import { getSessionUser } from "@/lib/auth";
 
 const IATA = /^[A-Za-z]{3}$/;
@@ -14,8 +15,8 @@ export function GET() {
   return NextResponse.json({
     watches,
     providerConfigured: Boolean(process.env.AMADEUS_CLIENT_ID && process.env.AMADEUS_CLIENT_SECRET),
-    checkIntervalHours: Number(process.env.FARE_WATCH_INTERVAL_HOURS || (process.env.SERPAPI_API_KEY ? 24 : 6)),
-    googleFlights: Boolean(process.env.SERPAPI_API_KEY?.trim()),
+    checkIntervalHours: Number(process.env.FARE_WATCH_INTERVAL_HOURS || (getSetting("SERPAPI_API_KEY") ? 24 : 6)),
+    googleFlights: Boolean(getSetting("SERPAPI_API_KEY")),
   });
 }
 

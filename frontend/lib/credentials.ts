@@ -34,3 +34,19 @@ export function encryptPassword(plain: string): string {
   const sealed = Buffer.concat([cipher.update(plain, "utf8"), cipher.final(), cipher.getAuthTag()]);
   return PREFIX + Buffer.concat([nonce, sealed]).toString("base64");
 }
+
+// Reverse of encryptPassword. Plain values (saved before a key existed) pass
+// through; a value that can't be decrypted returns null.
+export function decryptPassword(value: string): string | null {
+  if (!value.startsWith(PREFIX)) return value;
+  const key = loadKey();
+  if (!key) return null;
+  try {
+    const raw = Buffer.from(value.slice(PREFIX.length), "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(raw.length - 16));
+    return Buffer.concat([decipher.update(raw.subarray(12, raw.length - 16)), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}

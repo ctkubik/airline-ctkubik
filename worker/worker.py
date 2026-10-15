@@ -40,6 +40,7 @@ from db import (
     recover_stuck_checkins,
 )
 from lib.config import CAPTURES_DIR
+from lib.app_settings import apply_to_environ as apply_app_settings
 from lib.credentials import CredentialKeyError, encrypt_stored_passwords
 from lib.log import get_logger
 from lib.utils import (
@@ -1638,6 +1639,8 @@ def main_loop() -> None:
             # hiccup, a fare-check error) must not skip the others, above all
             # scheduling check-ins and the safety net.
             for name, step in (
+                # API keys and LM Studio settings saved on the dashboard
+                ("saved settings", lambda: apply_app_settings(conn)),
                 ("password encryption", lambda: encrypt_stored_passwords(conn)),
                 ("browser session", browser_session.ensure_alive),
                 ("accounts", lambda: process_accounts(conn)),

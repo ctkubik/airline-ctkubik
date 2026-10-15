@@ -1,5 +1,8 @@
+import { getSetting, settingOn } from "./settings";
+
 // Optional local LLM client (LM Studio or any OpenAI-compatible server).
-// Mirrors worker/lib/llm.py and reads the same environment variables:
+// Mirrors worker/lib/llm.py. Settings come from the API Connections page,
+// falling back to the same names in .env:
 //   LLM_ENABLED, LLM_BASE_URL (default http://localhost:1234/v1),
 //   LLM_MODEL (blank = whatever model is loaded), LLM_TIMEOUT (seconds).
 // Every helper returns null on any failure so callers degrade gracefully.
@@ -7,15 +10,15 @@
 const DEFAULT_BASE_URL = "http://localhost:1234/v1";
 
 export function llmEnabled(): boolean {
-  return ["1", "true", "yes", "on"].includes((process.env.LLM_ENABLED || "").trim().toLowerCase());
+  return settingOn("LLM_ENABLED");
 }
 
 function baseUrl(): string {
-  return (process.env.LLM_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  return (getSetting("LLM_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
 function timeoutMs(): number {
-  const seconds = Number(process.env.LLM_TIMEOUT || 60);
+  const seconds = Number(getSetting("LLM_TIMEOUT") || 60);
   return (Number.isFinite(seconds) && seconds > 0 ? seconds : 60) * 1000;
 }
 
@@ -41,7 +44,7 @@ export async function llmStatus(): Promise<LlmStatus> {
   try {
     const models = await listModels();
     status.reachable = true;
-    status.model = process.env.LLM_MODEL?.trim() || models[0] || null;
+    status.model = getSetting("LLM_MODEL").trim() || models[0] || null;
     if (!status.model) status.error = "LM Studio is running but no model is loaded";
   } catch (err) {
     status.error = err instanceof Error ? err.message : String(err);
@@ -52,7 +55,7 @@ export async function llmStatus(): Promise<LlmStatus> {
 export async function llmChat(system: string, user: string, maxTokens = 512): Promise<string | null> {
   if (!llmEnabled()) return null;
   try {
-    const model = process.env.LLM_MODEL?.trim() || (await listModels())[0];
+    const model = getSetting("LLM_MODEL").trim() || (await listModels())[0];
     if (!model) return null;
     const res = await fetch(`${baseUrl()}/chat/completions`, {
       method: "POST",

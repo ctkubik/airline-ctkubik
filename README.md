@@ -75,6 +75,9 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Spending**: What you paid on every airline (Southwest included), by year, airline and traveler, with rebooking savings
 - **Miles & Status**: Balances, elite status and progress for each program, with history. Type them in, or save the login and the Mac signs in about every 3 days and reads the account page *(experimental, see [Miles and status sync](#miles-and-status-sync-experimental))*
 
+### API Connections page
+- **One place for outside services**: LM Studio, AeroDataBox and SerpApi each get a card with step-by-step sign-up instructions, a **Test** button that checks the connection live, and their limits. Keys are saved encrypted and apply within a minute, no restart or .env editing. Only admins can change them
+
 ### Flight Status and Prices on Every Airline
 - **Flight status alerts** *(needs a free AeroDataBox key)*: delays of 15+ minutes, gate and terminal changes, cancellations and diversions for Southwest and other-airline flights. Lookups tighten as departure nears (a day out, every 3 hours from 12 hours out, every 30 minutes in the last 3 hours) to fit the free plan
 - **Prices on every airline** *(needs a free SerpApi key)*: fare watches on all airlines through Google Flights, and a price check every 2 days on trips you booked elsewhere, with an alert when the same flights drop $20+ below what you paid
@@ -386,6 +389,7 @@ python3 southwest.py --help
 | `HEALTHCHECK_PING_URL` | Optional [healthchecks.io](https://healthchecks.io) ping URL; you're alerted if pings stop (machine down) | (unset) |
 | `SOUTHWEST_WATCH_INTERVAL_HOURS` | How often Southwest fare watches are checked | `6` |
 | `LOYALTY_SYNC_INTERVAL_HOURS` | How often airline accounts with a saved login are synced | `72` |
+| *(note)* | The settings below, plus `LLM_*`, can also be set on the **API Connections** page; a value saved there wins over `.env` | |
 | `AERODATABOX_API_KEY` | RapidAPI key for AeroDataBox; turns on flight status alerts | (unset) |
 | `FLIGHT_STATUS_DELAY_MINUTES` | Alert when the departure time moves this much | `15` |
 | `FLIGHT_STATUS_MONTHLY_LIMIT` | AeroDataBox lookups allowed per month | `550` |

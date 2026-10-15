@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Plane, LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Activity, Menu, X, Search, UserCog, Luggage, Wallet, Award } from "lucide-react";
+import { Plane, LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Activity, Menu, X, Search, UserCog, Luggage, Wallet, Award, PlugZap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -17,6 +17,7 @@ const navItems = [
   { href: "/fare-watches", label: "Fare Watches", icon: Search },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/users", label: "Users", icon: UserCog },
+  { href: "/connections", label: "API Connections", icon: PlugZap },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
