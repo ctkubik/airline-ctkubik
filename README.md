@@ -24,6 +24,8 @@ A web application that automatically checks you in to your Southwest Airlines fl
     * [Users](#users-users)
     * [Fare Watches](#fare-watches-fare-watches)
     * [Seat Upgrades (experimental)](#seat-upgrades-experimental)
+    * [Other Airlines and Spending](#other-airlines-and-spending)
+    * [Miles and Status Sync (experimental)](#miles-and-status-sync-experimental)
 - [CLI Usage](#cli-usage)
 - [Configuration](#configuration)
     * [Environment Variables](#environment-variables)
@@ -67,6 +69,11 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Describe a trip** *(with local AI)*: type "Mom's visit, Phoenix to Chicago the week of Nov 20" and the form fills itself in
 - **Date windows**: Watch a whole departure/return window, not just one date
 - **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
+
+### Other Airlines, Spending, Miles and Status
+- **Trips on any airline**: Add Delta, United, American or any other trip by hand or by pasting the confirmation email (the local AI reads flights, travelers and the price; everything it reports must appear in the email). No check-in, but the trips show in the calendar feed with real flight lengths
+- **Spending**: What you paid on every airline (Southwest included), by year, airline and traveler, with rebooking savings
+- **Miles & Status**: Balances, elite status and progress for each program, with history. Type them in, or save the login and the Mac signs in about every 3 days and reads the account page *(experimental, see [Miles and status sync](#miles-and-status-sync-experimental))*
 
 ### Multi-User Login
 - **User accounts**: Admins create accounts for family members (member or admin role)
@@ -324,6 +331,22 @@ Named multi-airline fare tracking for trips you're planning:
 ### Seat Upgrades (experimental)
 The A-List auto seat-upgrade automates Southwest's desktop website in a real browser. Southwest changes that site frequently, so this feature is fragile: it may fail to find the seat map and can report a seat as selected without Southwest actually confirming it. Failures no longer interfere with check-ins (the browser is always restored, attempts are rate-limited, and check-ins take absolute priority), but treat any "seat selected" notification as unconfirmed until you verify in the Southwest app. The capture/audit system records every attempt (screenshots + DOM) under the flight's captures to help debug. Leave the per-account toggle off if you don't want it attempted at all.
 
+### Other Airlines and Spending
+**Other Airlines** holds trips on any airline. Click **Add from email**, paste the airline's confirmation or receipt email, and review what it found (with local AI off, it finds the confirmation number and total, and you type the flights). Or click **Add trip**. Times are local to each airport; the app converts them for the calendar feed. Southwest trips belong on **Reservations**, where the app checks you in.
+
+**Spending** totals what you paid by year, airline and traveler. Other-airline prices come from each trip; Southwest prices come from the fare you enter on the **Flights** page. Mark a trip **Cancelled** to leave it out.
+
+### Miles and Status Sync (experimental)
+**Miles & Status** lists each loyalty program (Delta SkyMiles, United MileagePlus, American AAdvantage, Atmos Rewards, JetBlue TrueBlue, Southwest Rapid Rewards and more, or any other program). Type the balance and status in, or save the program's login to have the Mac fill them in:
+
+- Every `LOYALTY_SYNC_INTERVAL_HOURS` (72) the worker opens the airline's website in its own Chrome window and profile, signs in, and reads the balance, status and progress. The local AI helps find the sign-in form and read the page; every number it reports must appear on the page.
+- If the airline sends a verification code, you get an alert. Type the code on the Miles page within 10 minutes. The Chrome profile remembers the device, so codes are usually a one-time thing.
+- **Sign in by hand** opens Chrome on the Mac and waits while you sign in yourself (at the Mac or over Screen Sharing). Use it for robot checks or app approvals. Later syncs reuse that sign-in, even without a saved password. (Mac only; in Docker the browser has no visible screen.)
+- To protect the account, a sync tries one sign-in, a rejected password stops automatic syncs until you update it, and two failures in a row pause them until you click **Sync now**. Syncs wait while a check-in is under an hour away.
+- Screenshots and page text of each step are saved in `data/captures/loyalty/<id>/` (last 5 syncs) for fixing a site that changed. Saved sign-ins (cookies) live in `data/browser-profiles/`; removing a program deletes both.
+
+Airline websites change often and some block automated browsers, so expect to use Sign in by hand now and then. Automated sign-in may also be against an airline's terms of use; the sync reads only your own account, at a slow pace, but use it at your own discretion.
+
 ## CLI Usage
 
 For the full usage of the CLI script, run:
@@ -347,6 +370,7 @@ python3 southwest.py --help
 | `CHECKIN_READINESS_HOURS` | Hours before each check-in to start confirming it will work | `3` |
 | `HEALTHCHECK_PING_URL` | Optional [healthchecks.io](https://healthchecks.io) ping URL; you're alerted if pings stop (machine down) | (unset) |
 | `SOUTHWEST_WATCH_INTERVAL_HOURS` | How often Southwest fare watches are checked | `6` |
+| `LOYALTY_SYNC_INTERVAL_HOURS` | How often airline accounts with a saved login are synced | `72` |
 | `CREDENTIALS_KEY` | Password encryption key (64 hex); macOS keeps it in the Keychain, Docker in `data/.credentials-key` | (auto) |
 | `LLM_ENABLED` | Turn on the optional local AI features | (off) |
 | `LLM_BASE_URL` | OpenAI-compatible server (LM Studio) | `http://localhost:1234/v1` |

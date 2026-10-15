@@ -42,6 +42,21 @@ def test_encrypts_stored_passwords_and_creates_key(
     assert credentials.encrypt_stored_passwords(db_conn) == 0
 
 
+def test_encrypts_airline_account_passwords(
+    db_conn, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: ANN001, E501
+    monkeypatch.setenv("CREDENTIALS_KEY", KEY.hex())
+    db_conn.execute(
+        "INSERT INTO loyalty_accounts (id, program, password) VALUES ('l1', 'delta', 'skymiles!'), "
+        "('l2', 'united', '')"
+    )
+    db_conn.commit()
+    assert credentials.encrypt_stored_passwords(db_conn) == 1
+    rows = dict(db_conn.execute("SELECT id, password FROM loyalty_accounts").fetchall())
+    assert credentials.decrypt(rows["l1"]) == "skymiles!"
+    assert rows["l2"] == ""  # no password saved (sign in by hand) stays empty
+
+
 def test_no_new_key_when_encrypted_values_exist(
     db_conn, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # noqa: ANN001, E501

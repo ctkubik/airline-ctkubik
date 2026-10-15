@@ -1417,6 +1417,25 @@ def check_southwest_watches(conn: sqlite3.Connection) -> None:
             conn.commit()
 
 
+loyalty_runner = None
+
+
+def run_loyalty_syncs(conn: sqlite3.Connection) -> None:
+    """Start any due airline account syncs (lib/loyalty_sync.py).
+
+    They open their own Chrome window, so they wait while a check-in is
+    under an hour away to keep the Mac's attention on the check-in.
+    """
+    global loyalty_runner
+    from lib.loyalty_sync import LoyaltySyncRunner
+    from notifications import send_notification
+
+    if loyalty_runner is None:
+        loyalty_runner = LoyaltySyncRunner(get_db, send_notification, shutdown_event)
+    soon = _checkin_within(1)
+    loyalty_runner.poll(conn, f"check-in for {soon} within an hour" if soon else None)
+
+
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
     """Check for manual seat check requests and execute them."""
     # '_' is a single-character wildcard in LIKE — escape it so this matches
@@ -1622,6 +1641,8 @@ def main_loop() -> None:
                 ("fare checks", lambda: check_fares(conn)),
                 ("fare watches", lambda: check_named_fare_watches(conn)),
                 ("Southwest fare watches", lambda: check_southwest_watches(conn)),
+                # Miles and status from airline websites, in a background thread
+                ("airline account syncs", lambda: run_loyalty_syncs(conn)),
                 # Seat upgrades for A-List accounts (48h before departure)
                 ("seat upgrades", lambda: attempt_seat_upgrades(conn)),
                 ("manual seat checks", lambda: process_manual_seat_checks(conn)),

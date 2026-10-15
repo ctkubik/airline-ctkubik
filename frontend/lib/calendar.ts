@@ -4,6 +4,7 @@
 // link can be made in Settings to cut off the old one.
 import crypto from "crypto";
 import type Database from "better-sqlite3";
+import { localToUtcIso } from "./airlines";
 
 const TOKEN_KEY = "calendar_token";
 
@@ -35,7 +36,7 @@ function icsDate(d: Date): string {
 }
 
 function escapeText(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+  return s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
 }
 
 // Lines longer than 75 octets must be folded (RFC 5545)
@@ -128,6 +129,58 @@ export function buildCalendar(db: Database.Database): string {
       "END:VEVENT"
     );
   }
+  // Trips on other airlines (no check-in to show)
+  const segments = db
+    .prepare(
+      `SELECT s.id, s.airline_code, s.flight_number, s.departure_airport, s.destination_airport,
+              s.departure_time, s.departure_local, s.arrival_local, t.airline, t.confirmation_number, t.traveler
+       FROM trip_segments s JOIN trips t ON t.id = s.trip_id
+       WHERE t.status != 'cancelled' AND s.departure_time > ?
+       ORDER BY s.departure_time`
+    )
+    .all(since) as {
+    id: string;
+    airline_code: string;
+    flight_number: string;
+    departure_airport: string;
+    destination_airport: string;
+    departure_time: string;
+    departure_local: string;
+    arrival_local: string | null;
+    airline: string;
+    confirmation_number: string;
+    traveler: string;
+  }[];
+  for (const s of segments) {
+    const depart = new Date(s.departure_time);
+    if (Number.isNaN(depart.getTime())) continue;
+    // Length from the arrival time at the destination's time zone; an hour
+    // when there's no arrival time or it doesn't make sense
+    let minutes = 60;
+    const arrive = localToUtcIso(s.arrival_local, s.destination_airport);
+    if (arrive) {
+      const diff = (Date.parse(arrive) - depart.getTime()) / 60000;
+      if (diff > 20 && diff < 24 * 60) minutes = diff;
+    }
+    const flightNo = s.flight_number ? `${s.airline_code} ${s.flight_number}` : s.airline;
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:trip-${s.id}@airline-checkin`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART:${icsDate(depart)}`,
+      `DURATION:PT${Math.round(minutes)}M`,
+      `SUMMARY:${escapeText(`✈ ${flightNo} ${s.departure_airport} → ${s.destination_airport}`)}`,
+      `LOCATION:${escapeText(s.departure_airport)}`,
+      `DESCRIPTION:${escapeText(
+        [s.traveler, s.confirmation_number && `Confirmation ${s.confirmation_number}`, s.airline,
+          s.arrival_local && `Arrives ${s.arrival_local.replace("T", " ")} local time`]
+          .filter(Boolean)
+          .join("\n")
+      )}`,
+      "END:VEVENT"
+    );
+  }
+
   lines.push("END:VCALENDAR");
   return lines.map(fold).join("\r\n") + "\r\n";
 }

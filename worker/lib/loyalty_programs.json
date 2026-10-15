@@ -1,0 +1,93 @@
+{
+  "delta": {
+    "name": "Delta SkyMiles",
+    "airline": "Delta",
+    "unit": "miles",
+    "home_url": "https://www.delta.com/",
+    "tiers": ["Silver Medallion", "Gold Medallion", "Platinum Medallion", "Diamond Medallion"]
+  },
+  "united": {
+    "name": "United MileagePlus",
+    "airline": "United",
+    "unit": "miles",
+    "home_url": "https://www.united.com/en/us",
+    "tiers": ["Premier Silver", "Premier Gold", "Premier Platinum", "Premier 1K"]
+  },
+  "american": {
+    "name": "American AAdvantage",
+    "airline": "American",
+    "unit": "miles",
+    "home_url": "https://www.aa.com/",
+    "tiers": ["Gold", "Platinum", "Platinum Pro", "Executive Platinum", "ConciergeKey"]
+  },
+  "atmos": {
+    "name": "Atmos Rewards (Alaska and Hawaiian)",
+    "airline": "Alaska",
+    "unit": "points",
+    "home_url": "https://www.alaskaair.com/",
+    "tiers": ["Atmos Silver", "Atmos Gold", "Atmos Platinum", "Atmos Titanium"]
+  },
+  "jetblue": {
+    "name": "JetBlue TrueBlue",
+    "airline": "JetBlue",
+    "unit": "points",
+    "home_url": "https://www.jetblue.com/",
+    "tiers": ["Mosaic 1", "Mosaic 2", "Mosaic 3", "Mosaic 4"]
+  },
+  "southwest": {
+    "name": "Southwest Rapid Rewards",
+    "airline": "Southwest",
+    "unit": "points",
+    "home_url": "https://www.southwest.com/",
+    "tiers": ["A-List", "A-List Preferred", "Companion Pass"]
+  },
+  "spirit": {
+    "name": "Spirit Free Spirit",
+    "airline": "Spirit",
+    "unit": "points",
+    "home_url": "https://www.spirit.com/",
+    "tiers": ["Silver", "Gold"]
+  },
+  "frontier": {
+    "name": "Frontier Miles",
+    "airline": "Frontier",
+    "unit": "miles",
+    "home_url": "https://www.flyfrontier.com/",
+    "tiers": ["Silver", "Gold", "Platinum", "Diamond"]
+  },
+  "allegiant": {
+    "name": "Allegiant Allways Rewards",
+    "airline": "Allegiant",
+    "unit": "points",
+    "home_url": "https://www.allegiantair.com/",
+    "tiers": []
+  },
+  "suncountry": {
+    "name": "Sun Country Rewards",
+    "airline": "Sun Country",
+    "unit": "points",
+    "home_url": "https://www.suncountry.com/",
+    "tiers": []
+  },
+  "aeroplan": {
+    "name": "Air Canada Aeroplan",
+    "airline": "Air Canada",
+    "unit": "points",
+    "home_url": "https://www.aircanada.com/",
+    "tiers": ["25K", "35K", "50K", "75K", "Super Elite"]
+  },
+  "avios": {
+    "name": "British Airways Club (Avios)",
+    "airline": "British Airways",
+    "unit": "Avios",
+    "home_url": "https://www.britishairways.com/",
+    "tiers": ["Bronze", "Silver", "Gold"]
+  },
+  "other": {
+    "name": "Other program",
+    "airline": "",
+    "unit": "miles",
+    "home_url": "",
+    "tiers": []
+  }
+}

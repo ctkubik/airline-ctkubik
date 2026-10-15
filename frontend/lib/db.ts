@@ -203,6 +203,73 @@ function initTables(db: Database.Database) {
       details_json TEXT,
       checked_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Trips on any airline (no check-in), for spending and the calendar
+    CREATE TABLE IF NOT EXISTS trips (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      airline TEXT NOT NULL,
+      confirmation_number TEXT DEFAULT '',
+      traveler TEXT DEFAULT '',
+      price_paid REAL,
+      currency TEXT DEFAULT 'USD',
+      points_used INTEGER,
+      booked_on TEXT,
+      cabin TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      loyalty_account_id TEXT,
+      status TEXT DEFAULT 'booked',
+      source TEXT DEFAULT 'manual',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS trip_segments (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      trip_id TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      position INTEGER DEFAULT 0,
+      airline_code TEXT DEFAULT '',
+      flight_number TEXT DEFAULT '',
+      departure_airport TEXT DEFAULT '',
+      destination_airport TEXT DEFAULT '',
+      departure_local TEXT,
+      departure_time TEXT,
+      arrival_local TEXT,
+      seat TEXT DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS loyalty_accounts (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      program TEXT NOT NULL,
+      program_name TEXT DEFAULT '',
+      owner_name TEXT DEFAULT '',
+      member_number TEXT DEFAULT '',
+      username TEXT DEFAULT '',
+      password TEXT DEFAULT '',
+      login_url TEXT DEFAULT '',
+      account_url TEXT DEFAULT '',
+      sync_enabled INTEGER DEFAULT 0,
+      balance INTEGER,
+      balance_unit TEXT DEFAULT 'miles',
+      status_tier TEXT DEFAULT '',
+      status_detail TEXT DEFAULT '',
+      status_expires TEXT,
+      points_expire TEXT,
+      last_synced_at TEXT,
+      last_sync_status TEXT,
+      last_sync_message TEXT,
+      sync_failures INTEGER DEFAULT 0,
+      sync_requested TEXT,
+      code_requested_at TEXT,
+      pending_code TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS loyalty_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      loyalty_account_id TEXT NOT NULL,
+      balance INTEGER,
+      status_tier TEXT,
+      source TEXT DEFAULT 'sync',
+      recorded_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 }
 

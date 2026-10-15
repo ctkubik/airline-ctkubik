@@ -11,6 +11,7 @@ Works on Apple Silicon (M1 to M4) and Intel Macs running macOS 13 Ventura or new
 - [How it runs](#how-it-runs)
 - [Make the Mac start up on its own](#make-the-mac-start-up-on-its-own)
 - [Local AI with LM Studio (optional)](#local-ai-with-lm-studio-optional)
+- [Miles and status sync](#miles-and-status-sync)
 - [Reach it from your phone (optional)](#reach-it-from-your-phone-optional)
 - [Everyday commands](#everyday-commands)
 - [Updating](#updating)
@@ -101,12 +102,14 @@ Test it: restart the Mac, wait two minutes, and run `./macos/ctl.sh status`.
 
 ## Local AI with LM Studio (optional)
 
-If [LM Studio](https://lmstudio.ai) runs on the Mac, the app can use its model for three things:
+If [LM Studio](https://lmstudio.ai) runs on the Mac, the app can use its model for these:
 
 | Feature | Where | What it does |
 |---------|-------|--------------|
 | Plain-English diagnostics | Activity > Diagnostics | An **Explain this** button turns a raw API error into a short explanation and what to do |
 | Describe a trip | Fare Watches > New Watch | Type "Mom's visit, Phoenix to Chicago the week of Nov 20, nonstop" and it fills in the form |
+| Read any airline's email | Other Airlines > Add from email | Pulls flights, travelers and the price out of a pasted confirmation email |
+| Miles sync | Miles & Status | Finds the sign-in form and reads the balance and status when an airline's website changes |
 | Smarter seat upgrades | Automatic | When Southwest changes its website and the built-in selectors miss a button or the seat map, the model finds it. It also reads the page after a seat change and only reports a seat as selected when Southwest confirms it |
 
 The check-in itself never uses the model. It stays plain, predictable code.
@@ -129,6 +132,17 @@ By default the app uses the first chat model LM Studio has. To pin one, add
 `./macos/ctl.sh restart`.
 
 If LM Studio is closed or the model is slow, the app carries on without it.
+
+## Miles and status sync
+
+When you save an airline login on the **Miles & Status** page, the worker opens a second Chrome
+window every few days, signs in to that airline and reads your balance. Leave it alone too; it
+closes by itself.
+
+**Sign in by hand** needs you to reach the Mac's screen. If the Mac Mini has no monitor, turn on
+**System Settings > General > Sharing > Screen Sharing**, then from another Mac open Finder, pick
+the Mac Mini under Network (or use `vnc://your-mac-name.local`). Sign in to the airline in the
+Chrome window that opened, then click **I'm signed in** on the Miles page.
 
 ## Reach it from your phone (optional)
 

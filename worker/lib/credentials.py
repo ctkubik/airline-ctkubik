@@ -1,4 +1,4 @@
-"""Encryption for stored Southwest passwords.
+"""Encryption for stored passwords (Southwest and airline loyalty accounts).
 
 The worker needs each account's real password to log in, so it can't be
 hashed; it's encrypted with AES-256-GCM instead. Stored values look like
@@ -100,34 +100,46 @@ def decrypt(value: str, key: bytes | None = None) -> str:
     raw = base64.b64decode(value[len(PREFIX) :])
     try:
         return AESGCM(key).decrypt(raw[:12], raw[12:], None).decode()
-    except Exception as err:  # noqa: BLE001 - InvalidTag and friends
+    except Exception as err:
         raise CredentialKeyError(
             "the stored password can't be decrypted with the current key (was the key changed?); "
             "re-enter the account's password on the Accounts page"
         ) from err
 
 
+# Tables holding passwords the worker signs in with
+PASSWORD_TABLES = ("accounts", "loyalty_accounts")
+
+
 def encrypt_stored_passwords(conn) -> int:  # noqa: ANN001
-    """Encrypt any plain-text account passwords in place. Returns how many."""
+    """Encrypt any plain-text stored passwords in place. Returns how many."""
     if not available():
         return 0
-    rows = conn.execute(
-        "SELECT id, password FROM accounts WHERE password NOT LIKE 'enc:%'"
-    ).fetchall()
+    rows = []
+    for table in PASSWORD_TABLES:
+        rows += [
+            (table, r[0], r[1])
+            for r in conn.execute(
+                f"SELECT id, password FROM {table} "
+                "WHERE password NOT LIKE 'enc:%' AND password != ''"
+            ).fetchall()
+        ]
     if not rows:
         return 0
     key = load_key()
     if key is None:
         # Only start a new key file when nothing is encrypted yet; otherwise
         # a missing key means the real one is somewhere else (the Keychain).
-        if conn.execute("SELECT 1 FROM accounts WHERE password LIKE 'enc:%' LIMIT 1").fetchone():
+        if any(
+            conn.execute(f"SELECT 1 FROM {t} WHERE password LIKE 'enc:%' LIMIT 1").fetchone()
+            for t in PASSWORD_TABLES
+        ):
             logger.error("Can't encrypt new passwords: the encryption key is missing")
             return 0
         key = create_key_file()
-    for account_id, password in rows:
-        conn.execute(
-            "UPDATE accounts SET password = ? WHERE id = ?", (encrypt(password, key), account_id)
-        )
+    for table, row_id, password in rows:
+        sealed = encrypt(password, key)
+        conn.execute(f"UPDATE {table} SET password = ? WHERE id = ?", (sealed, row_id))
     conn.commit()
-    logger.info("Encrypted %d stored Southwest password(s)", len(rows))
+    logger.info("Encrypted %d stored password(s)", len(rows))
     return len(rows)

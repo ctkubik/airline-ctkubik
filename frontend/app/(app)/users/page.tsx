@@ -100,12 +100,12 @@ export default function UsersPage() {
   }
 
   if (loading) {
-    return <div className="p-8 text-gray-500">Loading…</div>;
+    return <div className="text-gray-500">Loading…</div>;
   }
 
   if (notAdmin) {
     return (
-      <div className="p-8">
+      <div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Users</h1>
         <p className="text-gray-600">
           Only administrators can manage users. Ask your admin if you need your password reset.
@@ -115,7 +115,7 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Users</h1>
         <p className="text-sm text-gray-500 mt-1">

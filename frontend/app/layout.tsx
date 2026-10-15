@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SW Check-In",
+  title: "Airline Check-In",
   description: "Southwest Airlines Auto Check-In Monitor",
 };
 

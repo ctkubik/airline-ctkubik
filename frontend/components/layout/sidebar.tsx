@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Plane, LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Activity, Menu, X, Search, UserCog } from "lucide-react";
+import { Plane, LayoutDashboard, Users, CalendarCheck, Settings, LogOut, Activity, Menu, X, Search, UserCog, Luggage, Wallet, Award } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -11,6 +11,9 @@ const navItems = [
   { href: "/accounts", label: "Accounts", icon: Users },
   { href: "/reservations", label: "Reservations", icon: CalendarCheck },
   { href: "/flights", label: "Flights", icon: Plane },
+  { href: "/trips", label: "Other Airlines", icon: Luggage },
+  { href: "/spending", label: "Spending", icon: Wallet },
+  { href: "/miles", label: "Miles & Status", icon: Award },
   { href: "/fare-watches", label: "Fare Watches", icon: Search },
   { href: "/activity", label: "Activity", icon: Activity },
   { href: "/users", label: "Users", icon: UserCog },
@@ -57,13 +60,13 @@ export function Sidebar() {
         <div className="flex h-16 items-center justify-between border-b border-gray-200 px-6">
           <div className="flex items-center gap-2">
             <Plane className="h-6 w-6 text-blue-600" />
-            <span className="text-lg font-bold text-gray-900">SW Check-In</span>
+            <span className="text-lg font-bold text-gray-900">Airline Check-In</span>
           </div>
           <button onClick={() => setOpen(false)} className="md:hidden">
             <X className="h-5 w-5 text-gray-400" />
           </button>
         </div>
-        <nav className="space-y-1 p-4 flex-1">
+        <nav className="space-y-1 p-4 flex-1 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
             return (

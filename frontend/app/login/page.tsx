@@ -42,7 +42,7 @@ export default function LoginPage() {
           <div className="flex justify-center mb-2">
             <Plane className="h-10 w-10 text-blue-600" />
           </div>
-          <CardTitle className="text-2xl">SW Check-In</CardTitle>
+          <CardTitle className="text-2xl">Airline Check-In</CardTitle>
           <p className="text-sm text-gray-500 mt-1">Sign in to manage your flights</p>
         </CardHeader>
         <CardContent>
