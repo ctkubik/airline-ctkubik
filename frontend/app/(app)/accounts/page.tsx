@@ -12,8 +12,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { Plus, Trash2, Pencil, Armchair } from "lucide-react";
 import type { Account } from "@/lib/types";
+import { SeatPreferencesForm } from "@/components/seat-preferences-form";
 
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -26,6 +27,7 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editNameValue, setEditNameValue] = useState("");
+  const [prefsFor, setPrefsFor] = useState<Account | null>(null);
 
   useEffect(() => {
     fetchAccounts();
@@ -271,6 +273,9 @@ export default function AccountsPage() {
                       {account.reservation_count ?? 0} reservation
                       {(account.reservation_count ?? 0) !== 1 ? "s" : ""}
                     </span>
+                    <Button variant="outline" size="sm" onClick={() => setPrefsFor(account)}>
+                      <Armchair className="mr-1 h-4 w-4" /> Seats &amp; fares
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -292,6 +297,25 @@ export default function AccountsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={prefsFor !== null} onOpenChange={(o) => !o && setPrefsFor(null)}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Seats &amp; fares: {prefsFor?.display_name || prefsFor?.username}
+            </DialogTitle>
+          </DialogHeader>
+          {prefsFor && (
+            <div className="mt-4">
+              <SeatPreferencesForm
+                key={prefsFor.id}
+                accountId={prefsFor.id}
+                accountName={prefsFor.display_name || prefsFor.username}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

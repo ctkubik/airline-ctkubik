@@ -49,5 +49,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
   db.prepare("DELETE FROM accounts WHERE id = ?").run(params.id);
+  // The account's own seat and fare-check preferences (app/api/preferences)
+  db.prepare("DELETE FROM seat_preferences WHERE id = ?").run(`account:${params.id}`);
   return NextResponse.json({ ok: true });
 }

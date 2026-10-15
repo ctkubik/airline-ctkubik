@@ -52,6 +52,8 @@ A web application that automatically checks you in to your Southwest Airlines fl
 ### Account Management
 - **Account Monitoring**: Log in with your Southwest account to automatically track all reservations
 - **Display Names**: Assign friendly names to accounts for easy identification (e.g., "Mom", "Dad")
+- **Multiple Accounts**: Add as many Southwest accounts as you like; each is signed in on its own schedule and its flights are checked in, fare-checked and alerted on
+- **Per-Account Seats & Fares**: Each account can have its own seat preferences, "pick a better seat at check-in" switch and fare-check mode (Accounts > Seats & fares); accounts without their own use the shared set in Settings
 - **A-List Support**: Flag accounts as A-List or A-List Preferred status
 - **Better Seat at Check-In** *(experimental, see [Seat Upgrades](#seat-upgrades-experimental))*: right after check-in, moves you to a free seat that beats your current one under your preferences, and keeps looking until 2 hours before departure. A-List accounts can start 48 hours out. Paid seats are never chosen
 - **Smart Deactivation**: Accounts only deactivate after 3 consecutive confirmed credential failures; transient errors are retried automatically
@@ -96,6 +98,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
 
 ### Notifications
 - **Push Notifications**: Send alerts via Telegram, Discord, Slack, email, and 100+ other services using [Apprise](https://github.com/caronc/apprise)
+- **Telegram Alerts**: Guided setup in Settings: make a bot with BotFather, the app finds your chat (or a family group), sends a test, and saves it, with per-person routing and alert levels
 - **SMS Text Notifications**: Built-in Twilio quick setup form for text message alerts
 - **Test Notifications**: One-click test button to verify notification delivery
 - **Check-in Notifications**: Alerts on successful or failed check-in attempts

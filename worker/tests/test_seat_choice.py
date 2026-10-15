@@ -106,3 +106,30 @@ def test_checked_in_flights_queue_for_seat_picking(db_conn) -> None:  # noqa: AN
     db_conn.commit()
     [flight] = db.get_flights_for_seat_upgrade(db_conn)
     assert flight["last_seat_upgrade_attempt"] is None  # check-in cleared the cooldown
+
+
+def test_account_preferences_override_shared(db_conn) -> None:  # noqa: ANN001
+    dep = (datetime.utcnow() + timedelta(hours=20)).isoformat()
+    db_conn.execute(
+        "INSERT INTO accounts (id, username, password) VALUES ('a1', 'chad', 'x'), ('a2', 'pat', 'x')"
+    )
+    db_conn.executescript(
+        "INSERT INTO reservations (id, account_id, confirmation_number, first_name, last_name) "
+        "VALUES ('r1', 'a1', 'AAA111', 'Chad', 'K'), ('r2', 'a2', 'BBB222', 'Pat', 'K');"
+    )
+    for fid, rid in (("f1", "r1"), ("f2", "r2")):
+        db_conn.execute(
+            "INSERT INTO flights (id, reservation_id, departure_time, checkin_status) VALUES (?, ?, ?, 'success')",
+            (fid, rid, dep),
+        )
+    db_conn.execute(
+        "INSERT INTO seat_preferences (id, preferred_letters, fare_check_mode, pick_at_checkin) "
+        "VALUES ('default', 'A,F', 'same_day_nonstop', 0), ('account:a2', 'C,D', 'same_flight', 1)"
+    )
+    db_conn.commit()
+    assert db.get_seat_preferences(db_conn, "a1")["preferred_letters"] == "A,F"
+    own = db.get_seat_preferences(db_conn, "a2")
+    assert (own["preferred_letters"], own["fare_check_mode"]) == ("C,D", "same_flight")
+    # Only Pat's account turned seat picking on
+    assert [f["id"] for f in db.get_flights_for_seat_upgrade(db_conn)] == ["f2"]
+    assert db.get_flights_for_seat_upgrade(db_conn)[0]["pref_account_id"] == "a2"

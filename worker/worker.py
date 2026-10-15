@@ -544,7 +544,7 @@ def check_fares(conn: sqlite3.Connection) -> None:
             cards = shopping_response.get("changeShoppingPage", {}).get("flights", {}).get(target_bound_page, {}).get("cards", [])
 
             # Read fare check mode preference
-            prefs = get_seat_preferences(conn)
+            prefs = get_seat_preferences(conn, flight_row.get("pref_account_id"))
             fare_mode = (prefs or {}).get("fare_check_mode", "same_day_nonstop")
 
             # Find lowest fare based on mode
@@ -749,7 +749,8 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
     if force_flight_id:
         # Manual check for a specific flight - bypass normal query
         rows = conn.execute(
-            "SELECT f.*, r.confirmation_number, r.first_name, r.last_name "
+            "SELECT f.*, r.confirmation_number, r.first_name, r.last_name, "
+            "COALESCE(r.account_id, r.owner_account_id) AS pref_account_id "
             "FROM flights f JOIN reservations r ON r.id = f.reservation_id "
             "WHERE f.id = ?",
             (force_flight_id,),
@@ -769,16 +770,11 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
         add_log(conn, f"Browser session not available for seat upgrades: {e}", "error")
         return
 
-    prefs = get_seat_preferences(conn)
-    if not prefs:
-        add_log(conn, "No seat preferences set, skipping seat upgrades", "info")
-        return
-
     from lib.seat_choice import SeatPrefs, choose as choose_seat, current_seat_from_text, seat_costs_money, tier as seat_tier
 
-    seat_prefs = SeatPrefs.from_row(prefs)
-
     for flight_row in flights:
+        # Each traveler's account can have its own seat preferences
+        seat_prefs = SeatPrefs.from_row(get_seat_preferences(conn, flight_row.get("pref_account_id")))
         flight_id = flight_row["id"]
         conf_num = flight_row["confirmation_number"]
         first_name = flight_row["first_name"]

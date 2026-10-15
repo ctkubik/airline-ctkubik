@@ -610,7 +610,8 @@ def get_flights_for_fare_check(conn: sqlite3.Connection) -> list[dict]:
     """Get flights that have reservation_info and are still upcoming."""
     now = datetime.utcnow().isoformat()
     rows = conn.execute(
-        "SELECT f.*, r.confirmation_number, r.first_name, r.last_name "
+        "SELECT f.*, r.confirmation_number, r.first_name, r.last_name, "
+        "COALESCE(r.account_id, r.owner_account_id) AS pref_account_id "
         "FROM flights f JOIN reservations r ON r.id = f.reservation_id "
         "WHERE f.reservation_info_json IS NOT NULL "
         "AND f.reservation_info_json != '' "
@@ -622,7 +623,19 @@ def get_flights_for_fare_check(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_seat_preferences(conn: sqlite3.Connection) -> dict | None:
+def account_prefs_id(account_id: str) -> str:
+    """seat_preferences row id holding one Southwest account's own settings."""
+    return f"account:{account_id}"
+
+
+def get_seat_preferences(conn: sqlite3.Connection, account_id: str | None = None) -> dict | None:
+    """An account's own seat and fare-check settings, else the shared ('default') ones."""
+    if account_id:
+        row = conn.execute(
+            "SELECT * FROM seat_preferences WHERE id = ?", (account_prefs_id(account_id),)
+        ).fetchone()
+        if row:
+            return dict(row)
     row = conn.execute("SELECT * FROM seat_preferences WHERE id = 'default'").fetchone()
     return dict(row) if row else None
 
@@ -637,8 +650,9 @@ def get_flights_for_seat_upgrade(conn: sqlite3.Connection) -> list[dict]:
 
     * A-List accounts with auto upgrade on: from 48 hours out (A-List
       members can change seats then).
-    * "Pick a better seat at check-in" (Settings): every flight once it's
-      checked in, from 24 hours out. The first try runs right after check-in;
+    * "Pick a better seat at check-in" (on the account's own preferences, or
+      the shared ones in Settings): every flight once it's checked in, from
+      24 hours out. The first try runs right after check-in;
       later tries (every SEAT_UPGRADE_COOLDOWN) catch seats that open up.
     Both stop 2 hours before departure.
     """
@@ -646,18 +660,20 @@ def get_flights_for_seat_upgrade(conn: sqlite3.Connection) -> list[dict]:
     hours_2 = (now + timedelta(hours=2)).isoformat()
     hours_24 = (now + timedelta(hours=24)).isoformat()
     hours_48 = (now + timedelta(hours=48)).isoformat()
-    prefs = get_seat_preferences(conn) or {}
-    at_checkin = 1 if prefs.get("pick_at_checkin") else 0
     rows = conn.execute(
-        "SELECT f.*, r.confirmation_number, r.first_name, r.last_name, a.is_alist, a.auto_upgrade_seats "
+        "SELECT f.*, r.confirmation_number, r.first_name, r.last_name, a.is_alist, a.auto_upgrade_seats, "
+        "COALESCE(r.account_id, r.owner_account_id) AS pref_account_id "
         "FROM flights f "
         "JOIN reservations r ON r.id = f.reservation_id "
         "LEFT JOIN accounts a ON a.id = COALESCE(r.account_id, r.owner_account_id) "
+        "LEFT JOIN seat_preferences sa ON sa.id = 'account:' || COALESCE(r.account_id, r.owner_account_id) "
+        "LEFT JOIN seat_preferences sd ON sd.id = 'default' "
         "WHERE r.is_active = 1 AND ("
         "  (f.departure_time BETWEEN ? AND ? AND a.is_alist = 1 AND a.auto_upgrade_seats = 1)"
-        "  OR (? = 1 AND f.checkin_status = 'success' AND f.departure_time BETWEEN ? AND ?)"
+        "  OR (COALESCE(sa.pick_at_checkin, sd.pick_at_checkin, 0) = 1"
+        "      AND f.checkin_status = 'success' AND f.departure_time BETWEEN ? AND ?)"
         ") ORDER BY f.departure_time ASC",
-        (hours_2, hours_48, at_checkin, hours_2, hours_24),
+        (hours_2, hours_48, hours_2, hours_24),
     ).fetchall()
     return [dict(r) for r in rows]
 
