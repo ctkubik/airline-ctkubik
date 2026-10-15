@@ -53,7 +53,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Account Monitoring**: Log in with your Southwest account to automatically track all reservations
 - **Display Names**: Assign friendly names to accounts for easy identification (e.g., "Mom", "Dad")
 - **A-List Support**: Flag accounts as A-List or A-List Preferred status
-- **Auto Seat Upgrade** *(experimental — see [Seat Upgrades](#seat-upgrades-experimental))*: automatic seat upgrade attempts 48 hours before departure for A-List accounts
+- **Better Seat at Check-In** *(experimental, see [Seat Upgrades](#seat-upgrades-experimental))*: right after check-in, moves you to a free seat that beats your current one under your preferences, and keeps looking until 2 hours before departure. A-List accounts can start 48 hours out. Paid seats are never chosen
 - **Smart Deactivation**: Accounts only deactivate after 3 consecutive confirmed credential failures; transient errors are retried automatically
 
 ### Flight Tracking
@@ -65,7 +65,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
 
 ### Fare Watches (any airline)
 - **Named searches**: Create a watch per trip — "Mom's visit in October", "Spring break to Florida"
-- **Multi-airline**: Checked fares across carriers via Amadeus's free Self-Service flight-search API. **Offline since Amadeus shut that API down on July 17, 2026**; watches are kept until a new fare source is added (Southwest fares on booked flights are still tracked natively)
+- **Multi-airline**: Every airline on Google Flights through SerpApi (free key, 250 searches a month), checked once a day. Watches made with the old Amadeus source (shut down July 17, 2026) move over automatically once the key is added. Southwest isn't on Google Flights, so Southwest watches read southwest.com in the app's browser
 - **Describe a trip** *(with local AI)*: type "Mom's visit, Phoenix to Chicago the week of Nov 20" and the form fills itself in
 - **Date windows**: Watch a whole departure/return window, not just one date
 - **Drop alerts**: Push/SMS notification when the lowest fare drops (or is under your target price)
@@ -74,6 +74,11 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Trips on any airline**: Add Delta, United, American or any other trip by hand or by pasting the confirmation email (the local AI reads flights, travelers and the price; everything it reports must appear in the email). No check-in, but the trips show in the calendar feed with real flight lengths
 - **Spending**: What you paid on every airline (Southwest included), by year, airline and traveler, with rebooking savings
 - **Miles & Status**: Balances, elite status and progress for each program, with history. Type them in, or save the login and the Mac signs in about every 3 days and reads the account page *(experimental, see [Miles and status sync](#miles-and-status-sync-experimental))*
+
+### Flight Status and Prices on Every Airline
+- **Flight status alerts** *(needs a free AeroDataBox key)*: delays of 15+ minutes, gate and terminal changes, cancellations and diversions for Southwest and other-airline flights. Lookups tighten as departure nears (a day out, every 3 hours from 12 hours out, every 30 minutes in the last 3 hours) to fit the free plan
+- **Prices on every airline** *(needs a free SerpApi key)*: fare watches on all airlines through Google Flights, and a price check every 2 days on trips you booked elsewhere, with an alert when the same flights drop $20+ below what you paid
+- **Monthly caps**: both services stop at a monthly limit you set, so nothing runs up a bill; Settings shows usage
 
 ### Multi-User Login
 - **User accounts**: Admins create accounts for family members (member or admin role)
@@ -329,7 +334,17 @@ Named multi-airline fare tracking for trips you're planning:
 3. You get a notification (Telegram/SMS/etc., same services as check-in alerts) when the price drops or a fare is found under your target
 
 ### Seat Upgrades (experimental)
-The A-List auto seat-upgrade automates Southwest's desktop website in a real browser. Southwest changes that site frequently, so this feature is fragile: it may fail to find the seat map and can report a seat as selected without Southwest actually confirming it. Failures no longer interfere with check-ins (the browser is always restored, attempts are rate-limited, and check-ins take absolute priority), but treat any "seat selected" notification as unconfirmed until you verify in the Southwest app. The capture/audit system records every attempt (screenshots + DOM) under the flight's captures to help debug. Leave the per-account toggle off if you don't want it attempted at all.
+Turn on **Settings > Seat Preferences > Pick a better seat at check-in**. How it works:
+
+1. The app checks you in at the 24-hour mark (the check-in itself never waits on seats or the local AI).
+2. Right after, it opens your reservation on southwest.com, reads the seat map, and works out your current seat.
+3. It ranks open seats by your preferences: preferred letter in a preferred row, then preferred letter anywhere, then fallback letter in a preferred row, then fallback letter, then the rest. Rows you list to avoid rank last.
+4. It moves you only when a free seat ranks higher than your current one (or, if you set "move forward by", is that many rows closer to the front in the same rank). Seats that show a price or say extra legroom are skipped, and if the page asks for payment after a seat is clicked it stops without confirming.
+5. It looks again every 3 hours until 2 hours before departure, since seats free up as people change flights. You get an alert when it moves you.
+
+The local AI (LM Studio) only reads the pages: it finds the seat map and its prices when Southwest's page changes, spots a payment step, and confirms the change saved. Your preferences make the choice, so the same seat map always gives the same answer. Without the AI, it uses the built-in page patterns.
+
+The flow automates Southwest's desktop website in a real browser. Southwest changes that site frequently, so this feature is fragile: it may fail to find the seat map and can report a seat as selected without Southwest actually confirming it. Failures no longer interfere with check-ins (the browser is always restored, attempts are rate-limited, and check-ins take absolute priority), but treat any "seat selected" notification as unconfirmed until you verify in the Southwest app. The capture/audit system records every attempt (screenshots + DOM) under the flight's captures to help debug. Leave the per-account toggle off if you don't want it attempted at all.
 
 ### Other Airlines and Spending
 **Other Airlines** holds trips on any airline. Click **Add from email**, paste the airline's confirmation or receipt email, and review what it found (with local AI off, it finds the confirmation number and total, and you type the flights). Or click **Add trip**. Times are local to each airport; the app converts them for the calendar feed. Southwest trips belong on **Reservations**, where the app checks you in.
@@ -371,6 +386,13 @@ python3 southwest.py --help
 | `HEALTHCHECK_PING_URL` | Optional [healthchecks.io](https://healthchecks.io) ping URL; you're alerted if pings stop (machine down) | (unset) |
 | `SOUTHWEST_WATCH_INTERVAL_HOURS` | How often Southwest fare watches are checked | `6` |
 | `LOYALTY_SYNC_INTERVAL_HOURS` | How often airline accounts with a saved login are synced | `72` |
+| `AERODATABOX_API_KEY` | RapidAPI key for AeroDataBox; turns on flight status alerts | (unset) |
+| `FLIGHT_STATUS_DELAY_MINUTES` | Alert when the departure time moves this much | `15` |
+| `FLIGHT_STATUS_MONTHLY_LIMIT` | AeroDataBox lookups allowed per month | `550` |
+| `SERPAPI_API_KEY` | SerpApi key; turns on Google Flights prices (fare watches and booked trips) | (unset) |
+| `SERPAPI_MONTHLY_LIMIT` | Google Flights searches allowed per month | `240` |
+| `TRIP_PRICE_CHECK_HOURS` | How often a booked other-airline trip is re-priced | `48` |
+| `TRIP_PRICE_DROP_ALERT` | Alert when the same flights cost this many dollars less than you paid | `20` |
 | `CREDENTIALS_KEY` | Password encryption key (64 hex); macOS keeps it in the Keychain, Docker in `data/.credentials-key` | (auto) |
 | `LLM_ENABLED` | Turn on the optional local AI features | (off) |
 | `LLM_BASE_URL` | OpenAI-compatible server (LM Studio) | `http://localhost:1234/v1` |

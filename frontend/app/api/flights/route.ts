@@ -55,6 +55,20 @@ export function GET() {
     )
     .all(now);
 
+  // Live status from the worker's flight status lookups (AeroDataBox)
+  const live = new Map<string, unknown>();
+  for (const r of db.prepare("SELECT key, value FROM system_state WHERE key LIKE 'flight_status:flight:%'").all() as {
+    key: string;
+    value: string;
+  }[]) {
+    try {
+      const last = JSON.parse(r.value)?.last;
+      if (last) live.set(r.key.slice("flight_status:flight:".length), last);
+    } catch {
+      // ignore a malformed row
+    }
+  }
+
   const result = (flights as Record<string, unknown>[]).map((f) => {
     const latestFare = f.lf_price_change != null ? {
       price_change: f.lf_price_change,
@@ -79,7 +93,7 @@ export function GET() {
       if (key.startsWith("lf_") || key.startsWith("bf_")) delete clean[key];
     }
 
-    return { ...clean, latest_fare: latestFare, baseline_fare: baselineFare };
+    return { ...clean, latest_fare: latestFare, baseline_fare: baselineFare, live: live.get(String(f.id)) ?? null };
   });
 
   return NextResponse.json(result);

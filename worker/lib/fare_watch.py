@@ -330,27 +330,40 @@ def check_fare_watches(conn, notify_fn=None, interval_hours: float | None = None
     notify_fn(title, message) is called on price drops.
     """
     client = AmadeusClient()
-    if not client.configured:
+    from . import google_flights  # noqa: PLC0415
+
+    use_google = google_flights.configured()
+    if not client.configured and not use_google:
         return  # feature not configured; stay silent
+    # Amadeus shut its free API down; with a SerpApi key, Amadeus watches run
+    # on Google Flights too.
+    providers = ("google", "amadeus") if use_google else ("amadeus",)
 
     if interval_hours is None:
-        interval_hours = float(os.environ.get("FARE_WATCH_INTERVAL_HOURS", "6"))
+        # Google Flights searches are metered (250/month free): once a day
+        interval_hours = float(os.environ.get("FARE_WATCH_INTERVAL_HOURS", "24" if use_google else "6"))
     cutoff = (datetime.utcnow() - timedelta(hours=interval_hours)).isoformat()
     today = datetime.utcnow().date().isoformat()
 
     rows = conn.execute(
         "SELECT * FROM fare_watches WHERE is_active = 1 "
-        "AND COALESCE(provider, 'amadeus') = 'amadeus' "
+        f"AND COALESCE(provider, 'amadeus') IN ({','.join('?' * len(providers))}) "
         "AND (last_checked_at IS NULL OR last_checked_at < ?) "
         "AND depart_date_end >= ?",
-        (cutoff, today),
+        (*providers, cutoff, today),
     ).fetchall()
 
     for row in rows:
         watch = dict(row)
         now = datetime.utcnow().isoformat()
         try:
-            best = find_cheapest_fare(client, watch)
+            if use_google:
+                best = google_flights.find_watch_fare(conn, watch)
+            else:
+                best = find_cheapest_fare(client, watch)
+        except google_flights.BudgetExceeded as err:
+            logger.info("Fare watches paused: %s", err)
+            return
         except Exception as err:  # noqa: BLE001 - record any failure on the watch
             logger.error("Fare watch '%s' failed: %s", watch["name"], err)
             conn.execute(

@@ -14,7 +14,8 @@ export function GET() {
   return NextResponse.json({
     watches,
     providerConfigured: Boolean(process.env.AMADEUS_CLIENT_ID && process.env.AMADEUS_CLIENT_SECRET),
-    checkIntervalHours: Number(process.env.FARE_WATCH_INTERVAL_HOURS || 6),
+    checkIntervalHours: Number(process.env.FARE_WATCH_INTERVAL_HOURS || (process.env.SERPAPI_API_KEY ? 24 : 6)),
+    googleFlights: Boolean(process.env.SERPAPI_API_KEY?.trim()),
   });
 }
 
@@ -81,8 +82,9 @@ export async function POST(req: NextRequest) {
     max_price ? Number(max_price) : null,
     session?.username || "",
     // "southwest" = read fares from southwest.com in this app's browser;
-    // "amadeus" = the multi-airline API (offline since July 2026)
-    provider === "amadeus" ? "amadeus" : "southwest"
+    // "google" = every airline through Google Flights (SerpApi key needed);
+    // "amadeus" = the old multi-airline API, now also run on Google Flights
+    provider === "google" || provider === "amadeus" ? "google" : "southwest"
   );
 
   const watch = db.prepare("SELECT * FROM fare_watches WHERE id = ?").get(id);

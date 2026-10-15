@@ -48,6 +48,7 @@ interface FlightWithFare {
   checkin_status: string;
   checkin_result: string | null;
   assigned_seat?: string;
+  live?: { status: string; scheduled_departure: string | null; departure: string | null; gate: string; terminal: string } | null;
   confirmation_number: string;
   first_name: string;
   last_name: string;
@@ -232,6 +233,22 @@ export default function FlightsPage() {
                             Seat {flight.assigned_seat}
                           </span>
                         )}
+                        {flight.live && (() => {
+                          const l = flight.live;
+                          const late = l.departure && l.scheduled_departure
+                            ? Math.round((Date.parse(l.departure) - Date.parse(l.scheduled_departure)) / 60000)
+                            : 0;
+                          const bad = /cancel|divert/i.test(l.status);
+                          const text = [
+                            bad ? l.status : late >= 10 ? `${late} min late` : "On time",
+                            l.gate && `Gate ${l.gate}`,
+                          ].filter(Boolean).join(" · ");
+                          return (
+                            <span className={`ml-2 text-xs font-medium ${bad || late >= 30 ? "text-red-700" : "text-green-700"}`}>
+                              {text}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div className="text-sm">

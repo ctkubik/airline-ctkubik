@@ -36,7 +36,8 @@ export function GET() {
 export async function POST(req: NextRequest) {
   const db = getDb();
   ensureTable(db);
-  const { preferred_letters, preferred_rows, fallback_letters, fare_check_mode } = await req.json();
+  const body = await req.json();
+  const { preferred_letters, preferred_rows, fallback_letters, fare_check_mode } = body;
 
   const existing = db.prepare("SELECT id FROM seat_preferences WHERE id = 'default'").get();
   if (existing) {
@@ -48,6 +49,13 @@ export async function POST(req: NextRequest) {
       "INSERT INTO seat_preferences (id, preferred_letters, preferred_rows, fallback_letters, fare_check_mode) VALUES ('default', ?, ?, ?, ?)"
     ).run(preferred_letters, preferred_rows, fallback_letters, fare_check_mode || "same_day_nonstop");
   }
+
+  // Seat picking at check-in (worker/lib/seat_choice.py)
+  const avoid = typeof body.avoid_rows === "string" ? body.avoid_rows.replace(/[^0-9,\- ]/g, "").slice(0, 60) : "";
+  const gain = Math.max(0, Math.min(30, Math.floor(Number(body.min_row_gain) || 0)));
+  db.prepare(
+    "UPDATE seat_preferences SET pick_at_checkin = ?, avoid_rows = ?, min_row_gain = ? WHERE id = 'default'"
+  ).run(body.pick_at_checkin ? 1 : 0, avoid, gain);
 
   const prefs = db.prepare("SELECT * FROM seat_preferences WHERE id = 'default'").get();
   return NextResponse.json(prefs);

@@ -43,6 +43,7 @@ interface HistoryEntry {
 export default function FareWatchesPage() {
   const [watches, setWatches] = useState<FareWatch[]>([]);
   const [intervalHours, setIntervalHours] = useState(6);
+  const [googleFlights, setGoogleFlights] = useState(false);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export default function FareWatchesPage() {
       const data = await res.json();
       setWatches(data.watches);
       setIntervalHours(data.checkIntervalHours);
+      setGoogleFlights(Boolean(data.googleFlights));
     }
   }, []);
 
@@ -206,12 +208,20 @@ export default function FareWatchesPage() {
         </Button>
       </div>
 
-      <div className="rounded-md bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-800">
-        <strong>Southwest watches work; other airlines are offline.</strong> Southwest watches read
-        prices from southwest.com in this app&apos;s own browser (experimental, never within 2 hours of
-        a check-in). All-airline watches used Amadeus&apos;s free flight API, which Amadeus shut down on
-        July 17, 2026, so they&apos;re saved but not checked until a new source is added.
-      </div>
+      {googleFlights ? (
+        <div className="rounded-md bg-blue-50 border border-blue-200 p-4 text-sm text-blue-800">
+          <strong>All airlines through Google Flights.</strong> Those watches are checked once a day, two
+          dates per window, to stay inside SerpApi&apos;s free 250 searches a month (Settings shows usage).
+          Southwest isn&apos;t on Google Flights, so Southwest watches read southwest.com in this app&apos;s
+          browser (experimental, never within 2 hours of a check-in).
+        </div>
+      ) : (
+        <div className="rounded-md bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-800">
+          <strong>Southwest watches work; other airlines need a SerpApi key.</strong> Add a free key (see
+          Settings &gt; Flight Data Services) to check every other airline through Google Flights. Until
+          then, all-airline watches are saved but not checked.
+        </div>
+      )}
 
       {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
@@ -260,7 +270,9 @@ export default function FareWatchesPage() {
                   className="rounded-md border border-gray-300 px-3 py-2 text-sm md:w-96"
                 >
                   <option value="southwest">Southwest (checked in this app&apos;s browser)</option>
-                  <option value="amadeus">All other airlines (offline: no fare source)</option>
+                  <option value="google">
+                    All other airlines (Google Flights{googleFlights ? "" : ": needs a SerpApi key"})
+                  </option>
                 </select>
                 {form.provider === "southwest" && (
                   <p className="text-xs text-gray-400">
@@ -394,7 +406,7 @@ export default function FareWatchesPage() {
                   {w.is_active ? "watching" : "paused"}
                 </Badge>
                 <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                  {w.provider === "southwest" ? "Southwest" : "All airlines (offline)"}
+                  {w.provider === "southwest" ? "Southwest" : googleFlights ? "Google Flights" : "All airlines (needs key)"}
                 </span>
                 {w.best_price !== null && (
                   <div className="flex items-center gap-1 text-green-700 font-semibold">

@@ -91,6 +91,7 @@ def test_extract_seats_normalizes_output() -> None:
             "tag": "BUTTON",
             "selector": f'[{attr}="0"]',
             "source": "llm",
+            "price": 0.0,
         }
     ]
 

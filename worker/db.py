@@ -231,6 +231,13 @@ def _init_tables(conn: sqlite3.Connection) -> None:
           created_at TEXT DEFAULT (datetime('now')),
           updated_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS trip_price_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          trip_id TEXT NOT NULL,
+          price REAL NOT NULL,
+          exact INTEGER DEFAULT 0,
+          checked_at TEXT DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS loyalty_history (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           loyalty_account_id TEXT NOT NULL,
@@ -319,6 +326,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
     fw_cols = [row[1] for row in conn.execute("PRAGMA table_info(fare_watches)").fetchall()]
     if fw_cols and "provider" not in fw_cols:
         conn.execute("ALTER TABLE fare_watches ADD COLUMN provider TEXT DEFAULT 'amadeus'")
+
+    # Seat picking at check-in, rows to avoid, and how far forward counts as better
+    sp_cols = [row[1] for row in conn.execute("PRAGMA table_info(seat_preferences)").fetchall()]
+    for col, ddl in (
+        ("pick_at_checkin", "pick_at_checkin INTEGER DEFAULT 0"),
+        ("avoid_rows", "avoid_rows TEXT DEFAULT ''"),
+        ("min_row_gain", "min_row_gain INTEGER DEFAULT 0"),
+    ):
+        if sp_cols and col not in sp_cols:
+            conn.execute(f"ALTER TABLE seat_preferences ADD COLUMN {ddl}")
+
+    # Price and status tracking for trips on other airlines
+    trip_cols = [row[1] for row in conn.execute("PRAGMA table_info(trips)").fetchall()]
+    for col, ddl in (
+        ("price_checked_at", "price_checked_at TEXT"),
+        ("current_price", "current_price REAL"),
+        ("current_price_exact", "current_price_exact INTEGER DEFAULT 0"),
+        ("price_note", "price_note TEXT"),
+        ("price_alerted_at_price", "price_alerted_at_price REAL"),
+    ):
+        if trip_cols and col not in trip_cols:
+            conn.execute(f"ALTER TABLE trips ADD COLUMN {ddl}")
 
     # Plain-English explanation of a diagnostic, written by the local LLM
     diag_cols = [row[1] for row in conn.execute("PRAGMA table_info(diagnostics)").fetchall()]
@@ -423,6 +452,9 @@ def update_flight_status(
     status: str,
     result: str | None = None,
 ) -> None:
+    if status == "success":
+        # Check-in just opened seat changes: let the seat check run right away
+        conn.execute("UPDATE flights SET last_seat_upgrade_attempt = NULL WHERE id = ?", (flight_id,))
     if result:
         conn.execute(
             "UPDATE flights SET checkin_status = ?, checkin_result = ?, "
@@ -595,19 +627,31 @@ def update_flight_seat(conn: sqlite3.Connection, flight_id: str, seat: str) -> N
 
 
 def get_flights_for_seat_upgrade(conn: sqlite3.Connection) -> list[dict]:
-    """Get flights departing in 2-48 hours linked to A-List accounts with auto_upgrade enabled.
-    A-List members can upgrade seats from 48 hours before departure until 2 hours before."""
-    hours_2 = (datetime.utcnow() + timedelta(hours=2)).isoformat()
-    hours_48 = (datetime.utcnow() + timedelta(hours=48)).isoformat()
+    """Flights whose seat the app should try to improve, departing in 2-48 hours.
+
+    * A-List accounts with auto upgrade on: from 48 hours out (A-List
+      members can change seats then).
+    * "Pick a better seat at check-in" (Settings): every flight once it's
+      checked in, from 24 hours out. The first try runs right after check-in;
+      later tries (every SEAT_UPGRADE_COOLDOWN) catch seats that open up.
+    Both stop 2 hours before departure.
+    """
+    now = datetime.utcnow()
+    hours_2 = (now + timedelta(hours=2)).isoformat()
+    hours_24 = (now + timedelta(hours=24)).isoformat()
+    hours_48 = (now + timedelta(hours=48)).isoformat()
+    prefs = get_seat_preferences(conn) or {}
+    at_checkin = 1 if prefs.get("pick_at_checkin") else 0
     rows = conn.execute(
         "SELECT f.*, r.confirmation_number, r.first_name, r.last_name, a.is_alist, a.auto_upgrade_seats "
         "FROM flights f "
         "JOIN reservations r ON r.id = f.reservation_id "
-        "LEFT JOIN accounts a ON a.id = r.account_id "
-        "WHERE f.departure_time BETWEEN ? AND ? "
-        "AND a.is_alist = 1 AND a.auto_upgrade_seats = 1 "
-        "ORDER BY f.departure_time ASC",
-        (hours_2, hours_48),
+        "LEFT JOIN accounts a ON a.id = COALESCE(r.account_id, r.owner_account_id) "
+        "WHERE r.is_active = 1 AND ("
+        "  (f.departure_time BETWEEN ? AND ? AND a.is_alist = 1 AND a.auto_upgrade_seats = 1)"
+        "  OR (? = 1 AND f.checkin_status = 'success' AND f.departure_time BETWEEN ? AND ?)"
+        ") ORDER BY f.departure_time ASC",
+        (hours_2, hours_48, at_checkin, hours_2, hours_24),
     ).fetchall()
     return [dict(r) for r in rows]
 

@@ -262,6 +262,13 @@ function initTables(db: Database.Database) {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS trip_price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id TEXT NOT NULL,
+      price REAL NOT NULL,
+      exact INTEGER DEFAULT 0,
+      checked_at TEXT DEFAULT (datetime('now'))
+    );
     CREATE TABLE IF NOT EXISTS loyalty_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       loyalty_account_id TEXT NOT NULL,
@@ -318,4 +325,12 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("notification_configs", "account_ids", "account_ids TEXT");
   addColumnIfMissing("reservations", "owner_account_id", "owner_account_id TEXT");
   addColumnIfMissing("fare_watches", "provider", "provider TEXT DEFAULT 'amadeus'");
+  addColumnIfMissing("seat_preferences", "pick_at_checkin", "pick_at_checkin INTEGER DEFAULT 0");
+  addColumnIfMissing("seat_preferences", "avoid_rows", "avoid_rows TEXT DEFAULT ''");
+  addColumnIfMissing("seat_preferences", "min_row_gain", "min_row_gain INTEGER DEFAULT 0");
+  addColumnIfMissing("trips", "price_checked_at", "price_checked_at TEXT");
+  addColumnIfMissing("trips", "current_price", "current_price REAL");
+  addColumnIfMissing("trips", "current_price_exact", "current_price_exact INTEGER DEFAULT 0");
+  addColumnIfMissing("trips", "price_note", "price_note TEXT");
+  addColumnIfMissing("trips", "price_alerted_at_price", "price_alerted_at_price REAL");
 }

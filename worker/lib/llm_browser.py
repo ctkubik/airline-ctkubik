@@ -180,8 +180,10 @@ def extract_seats(driver: Any, client: LLMClient | None = None) -> list[dict] | 
         "You read an airplane seat map from a web page. You are given a numbered list of "
         "visible page elements. Identify the elements that are individual seats a "
         "passenger can select right now (not occupied, blocked, or disabled). Seat ids "
-        'look like a row number plus a letter, e.g. "12A". Answer '
-        '{"seats": [{"index": <number>, "seat": "<row><letter>"}, ...]} '
+        'look like a row number plus a letter, e.g. "12A". Give the price shown for the '
+        "seat in dollars, or 0 if none is shown; extra legroom or upgrade seats count as paid "
+        "even without a number (use 1). Answer "
+        '{"seats": [{"index": <number>, "seat": "<row><letter>", "price": <number>}, ...]} '
         "(an empty list if there is no seat map).",
         _format_candidates(candidates),
         max_tokens=4000,
@@ -206,10 +208,18 @@ def extract_seats(driver: Any, client: LLMClient | None = None) -> list[dict] | 
                 "tag": c.get("tag", "").upper(),
                 "selector": _selector(attr, idx),
                 "source": "llm",
+                "price": _price(item.get("price")),
             }
         )
     logger.info("LLM extracted %d available seats", len(seats))
     return seats
+
+
+def _price(value: Any) -> float:  # noqa: ANN401
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def verify_outcome(driver: Any, question: str, client: LLMClient | None = None) -> dict | None:

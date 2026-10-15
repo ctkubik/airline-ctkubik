@@ -16,6 +16,13 @@ interface Segment {
   departure_local: string;
   arrival_local: string | null;
   seat: string;
+  live?: {
+    status: string;
+    scheduled_departure: string | null;
+    departure: string | null;
+    gate: string;
+    terminal: string;
+  } | null;
 }
 
 interface Trip {
@@ -33,6 +40,26 @@ interface Trip {
   source: string;
   segments: Segment[];
   first_departure: string | null;
+  current_price?: number | null;
+  current_price_exact?: number;
+  price_note?: string | null;
+}
+
+// "Delayed 40 min · Gate B9" from the worker's last flight status lookup
+function liveText(live: NonNullable<Segment["live"]>): { text: string; bad: boolean } {
+  const parts: string[] = [];
+  const late =
+    live.departure && live.scheduled_departure
+      ? Math.round((Date.parse(live.departure) - Date.parse(live.scheduled_departure)) / 60000)
+      : 0;
+  const bad = /cancel|divert/i.test(live.status);
+  if (bad) parts.push(live.status.replace("CanceledUncertain", "Possibly canceled"));
+  else if (late >= 10) parts.push(`${late} min late`);
+  else if (/departed|enroute|arrived|approaching/i.test(live.status)) parts.push(live.status.replace("EnRoute", "In the air"));
+  else parts.push("On time");
+  if (live.terminal) parts.push(`Terminal ${live.terminal}`);
+  if (live.gate) parts.push(`Gate ${live.gate}`);
+  return { text: parts.join(" · "), bad: bad || late >= 30 };
 }
 
 interface FoundTrip {
@@ -327,9 +354,24 @@ export default function TripsPage() {
                       <span className="w-20 font-mono text-gray-500">{s.flight_number ? `${s.airline_code} ${s.flight_number}` : ""}</span>
                       <span className="w-28 font-medium">{s.departure_airport} → {s.destination_airport}</span>
                       <span>{fmtLocal(s.departure_local)}</span>
+                      {s.live && (() => {
+                        const l = liveText(s.live);
+                        return (
+                          <span className={l.bad ? "font-medium text-red-700" : "text-green-700"}>{l.text}</span>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>
+                {t.current_price != null && t.price_paid != null && (
+                  <p className={`text-xs ${t.current_price < t.price_paid - 1 ? "font-medium text-green-700" : "text-gray-500"}`}>
+                    Google Flights now: ${t.current_price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    {t.price_note ? ` (${t.price_note})` : ""}
+                    {t.current_price < t.price_paid - 1 && t.current_price_exact
+                      ? `. That's $${(t.price_paid - t.current_price).toFixed(0)} under what you paid.`
+                      : ""}
+                  </p>
+                )}
                 {(t.cabin || t.notes) && (
                   <p className="text-xs text-gray-500">{[t.cabin, t.notes].filter(Boolean).join(" · ")}</p>
                 )}

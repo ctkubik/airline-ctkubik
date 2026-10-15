@@ -773,10 +773,9 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
         add_log(conn, "No seat preferences set, skipping seat upgrades", "info")
         return
 
-    # Parse preferences
-    preferred_letters = [l.strip() for l in prefs.get("preferred_letters", "A,F").split(",")]
-    preferred_rows = [int(r.strip()) for r in prefs.get("preferred_rows", "1,2,3,4,5,6").split(",") if r.strip().isdigit()]
-    fallback_letters = [l.strip() for l in prefs.get("fallback_letters", "A,C,D,F").split(",")]
+    from lib.seat_choice import SeatPrefs, choose as choose_seat, current_seat_from_text, seat_costs_money, tier as seat_tier
+
+    seat_prefs = SeatPrefs.from_row(prefs)
 
     for flight_row in flights:
         flight_id = flight_row["id"]
@@ -1134,14 +1133,14 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                     var seats = [];
                     // Strategy 1: data-seat-number attributes
                     document.querySelectorAll('[data-seat-number]').forEach(function(el) {
-                        seats.push({seat: el.getAttribute('data-seat-number'), className: el.className, disabled: el.disabled || el.getAttribute('aria-disabled') === 'true', text: el.textContent.trim().substring(0, 20), tag: el.tagName});
+                        seats.push({seat: el.getAttribute('data-seat-number'), className: el.className, disabled: el.disabled || el.getAttribute('aria-disabled') === 'true', text: el.textContent.trim().substring(0, 40), aria: (el.getAttribute('aria-label') || '').substring(0, 80), tag: el.tagName});
                     });
                     // Strategy 2: buttons/divs with seat classes containing seat IDs
                     if (seats.length === 0) {
                         document.querySelectorAll('button[class*="seat"], div[class*="seat"], td[class*="seat"]').forEach(function(el) {
                             var text = el.textContent.trim();
                             if (text.match(/^\\d{1,2}[A-F]$/)) {
-                                seats.push({seat: text, className: el.className, disabled: el.disabled || el.getAttribute('aria-disabled') === 'true', text: text, tag: el.tagName});
+                                seats.push({seat: text, className: el.className, disabled: el.disabled || el.getAttribute('aria-disabled') === 'true', text: text, aria: (el.getAttribute('aria-label') || '').substring(0, 80), tag: el.tagName});
                             }
                         });
                     }
@@ -1151,7 +1150,7 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                             var label = el.getAttribute('aria-label') || '';
                             var match = label.match(/(\\d{1,2}[A-F])/);
                             if (match) {
-                                seats.push({seat: match[1], className: el.className, disabled: el.disabled || el.getAttribute('aria-disabled') === 'true', text: label.substring(0, 50), tag: el.tagName});
+                                seats.push({seat: match[1], className: el.className, disabled: el.disabled || el.getAttribute('aria-disabled') === 'true', text: label.substring(0, 80), tag: el.tagName});
                             }
                         });
                     }
@@ -1184,34 +1183,18 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                                    "Seat elements", f"0 found. Buttons: {page_meta.get('allButtons')}",
                                    response_snapshot=page_text[:500])
                 else:
-                    # Step 7: Filter and score seats
-                    available_seats = []
-                    for s in all_seats:
-                        seat_id = s.get("seat", "")
-                        if not seat_id or s.get("disabled"):
-                            continue
-                        cls = (s.get("className") or "").lower()
-                        if "unavailable" in cls or "occupied" in cls or "blocked" in cls:
-                            continue
-                        row_str, letter = "", ""
-                        for ch in str(seat_id):
-                            if ch.isdigit(): row_str += ch
-                            elif ch.isalpha(): letter = ch.upper(); break
-                        if row_str and letter:
-                            row = int(row_str)
-                            score = 20
-                            if letter in preferred_letters and row in preferred_rows: score = 100
-                            elif letter in preferred_letters: score = 80
-                            elif letter in fallback_letters and row in preferred_rows: score = 60
-                            elif letter in fallback_letters: score = 40
-                            available_seats.append({"seat": seat_id, "row": row, "letter": letter, "score": score, "selector": s.get("selector")})
-
-                    available_seats.sort(key=lambda x: (-x["score"], x["row"]))
-                    add_log(conn, f"Available seats: {len(available_seats)} | Top 5: {[s['seat'] for s in available_seats[:5]]}", "info", flight_id)
-                    audit.end_step(success=len(available_seats) > 0, data={
+                    # Step 7: Take a seat only when it's free and beats the current
+                    # one under the Settings preferences (lib/seat_choice.py)
+                    if not current_seat:
+                        page_text = driver.execute_script("return document.body ? document.body.innerText : ''") or ""
+                        current_seat = current_seat_from_text(page_text) or ""
+                    choice, why = choose_seat(all_seats, current_seat or None, seat_prefs)
+                    add_log(conn, f"Seat check for {conf_num} (current {current_seat or 'unknown'}): {why}", "info", flight_id)
+                    available_seats = [{**choice, "score": seat_tier(choice["seat"], seat_prefs)}] if choice else []
+                    audit.end_step(success=True, data={
                         "total_found": len(all_seats),
-                        "available": len(available_seats),
-                        "top_5": [{"seat": s["seat"], "score": s["score"]} for s in available_seats[:5]],
+                        "current_seat": current_seat,
+                        "decision": why,
                     })
 
                     if available_seats:
@@ -1232,10 +1215,16 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                             except Exception:
                                 continue
 
+                        paid = False
                         if clicked:
                             time.sleep(2)
                             driver.save_screenshot(f"{cap_dir}/05_after_click.png")
-
+                            # Never buy a seat: if finishing would charge money, stop here
+                            paid = seat_costs_money(driver)
+                        if paid:
+                            add_log(conn, f"Seat {best['seat']} would cost money; keeping {current_seat or 'the current seat'}", "warning", flight_id)
+                            audit.end_step(success=False, data={"seat": best["seat"], "clicked": True, "paid": True})
+                        elif clicked:
                             confirm_clicked = False
                             for confirm_sel in ["button:contains('Continue')", "button:contains('Confirm')", "button:contains('Save')", "button:contains('Done')", "button[type='submit']"]:
                                 try:
@@ -1276,9 +1265,9 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                                 try:
                                     from notifications import send_notification
                                     if confirmed:
-                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} confirmed for {route}", "important", flight_id=flight_id)
+                                        send_notification(f"Better seat: {conf_num}", f"Moved to seat {best['seat']}" + (f" from {current_seat}" if current_seat else "") + f" on {route}", "important", flight_id=flight_id)
                                     else:
-                                        send_notification(f"Seat Selected: {conf_num}", f"Seat {best['seat']} selected for {route} (not confirmed, check the Southwest app)", "important", flight_id=flight_id)
+                                        send_notification(f"Better seat: {conf_num}", f"Picked seat {best['seat']}" + (f" over {current_seat}" if current_seat else "") + f" on {route} (not confirmed, check the Southwest app)", "important", flight_id=flight_id)
                                 except Exception:
                                     pass
                         else:
@@ -1415,6 +1404,26 @@ def check_southwest_watches(conn: sqlite3.Connection) -> None:
                 (datetime.utcnow().isoformat(), f"Southwest search failed: {e}"[:500], watch["id"]),
             )
             conn.commit()
+
+
+def run_flight_status(conn: sqlite3.Connection) -> None:
+    """Delay, gate and cancellation alerts (lib/flight_status.py). Needs AERODATABOX_API_KEY."""
+    from lib import flight_status
+    from notifications import send_notification
+
+    if flight_status.configured():
+        made = flight_status.check_statuses(conn, send_notification)
+        if made:
+            logger.info("Flight status: %d lookup(s)", made)
+
+
+def run_trip_prices(conn: sqlite3.Connection) -> None:
+    """Re-price booked other-airline trips (lib/google_flights.py). Needs SERPAPI_API_KEY."""
+    from lib import google_flights
+    from notifications import send_notification
+
+    if google_flights.configured():
+        google_flights.check_trip_prices(conn, send_notification)
 
 
 loyalty_runner = None
@@ -1641,6 +1650,9 @@ def main_loop() -> None:
                 ("fare checks", lambda: check_fares(conn)),
                 ("fare watches", lambda: check_named_fare_watches(conn)),
                 ("Southwest fare watches", lambda: check_southwest_watches(conn)),
+                # Flight status (AeroDataBox) and other-airline trip prices (Google Flights)
+                ("flight status", lambda: run_flight_status(conn)),
+                ("trip prices", lambda: run_trip_prices(conn)),
                 # Miles and status from airline websites, in a background thread
                 ("airline account syncs", lambda: run_loyalty_syncs(conn)),
                 # Seat upgrades for A-List accounts (48h before departure)

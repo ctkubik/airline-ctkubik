@@ -4,10 +4,22 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Trash2, Plus, Save, MessageSquare, Sparkles, RefreshCw, CalendarDays } from "lucide-react";
 import type { NotificationConfig } from "@/lib/types";
 
 const ALL_SEAT_LETTERS = ["A", "B", "C", "D", "E", "F"];
+
+interface ServiceInfo {
+  configured: boolean;
+  used: number;
+  limit: number;
+}
+
+interface ServicesStatus {
+  flight_status: ServiceInfo;
+  google_flights: ServiceInfo;
+}
 
 // Matches worker/notifications.py: which alerts a service receives
 const LEVELS = [
@@ -61,6 +73,10 @@ export default function SettingsPage() {
   const [fallbackLetters, setFallbackLetters] = useState<string[]>(["A", "C", "D", "F"]);
   const [fareCheckMode, setFareCheckMode] = useState("same_day_nonstop");
   const [seatSaved, setSeatSaved] = useState(false);
+  const [pickAtCheckin, setPickAtCheckin] = useState(false);
+  const [avoidRows, setAvoidRows] = useState("");
+  const [minRowGain, setMinRowGain] = useState("0");
+  const [services, setServices] = useState<ServicesStatus | null>(null);
 
   // Local LLM (LM Studio) connection status
   const [llm, setLlm] = useState<{
@@ -84,6 +100,7 @@ export default function SettingsPage() {
     fetchNotifications();
     fetchPreferences();
     fetchLlmStatus();
+    fetchServices();
     fetch("/api/calendar/link")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setCalendarToken(d?.token ?? null))
@@ -117,6 +134,14 @@ export default function SettingsPage() {
     if (data.preferred_rows) setPreferredRows(data.preferred_rows);
     if (data.fallback_letters) setFallbackLetters(data.fallback_letters.split(","));
     if (data.fare_check_mode) setFareCheckMode(data.fare_check_mode);
+    setPickAtCheckin(Boolean(data.pick_at_checkin));
+    setAvoidRows(data.avoid_rows || "");
+    setMinRowGain(String(data.min_row_gain ?? 0));
+  }
+
+  async function fetchServices() {
+    const res = await fetch("/api/services/status");
+    if (res.ok) setServices(await res.json());
   }
 
   async function addNotification(e: React.FormEvent) {
@@ -176,6 +201,9 @@ export default function SettingsPage() {
         preferred_rows: preferredRows,
         fallback_letters: fallbackLetters.join(","),
         fare_check_mode: fareCheckMode,
+        pick_at_checkin: pickAtCheckin,
+        avoid_rows: avoidRows,
+        min_row_gain: Number(minRowGain) || 0,
       }),
     });
     setSeatSaved(true);
@@ -225,11 +253,29 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-gray-500">
-            Configure your preferred seat selections. Southwest now assigns seats at booking or
-            check-in. For Basic fares, a seat is assigned at check-in. For A-List members, the app
-            will attempt to upgrade to a preferred seat 48 hours before departure. These preferences
-            determine which seats the system will target.
+            Southwest assigns seats at booking or check-in. With seat picking on, right after the app
+            checks you in it opens the seat map and moves you only if a free seat beats your current
+            one under these preferences, then looks again every 3 hours until 2 hours before
+            departure as seats open up. A-List accounts with auto upgrade on start 48 hours out. Paid
+            seats (extra legroom, upgrades) are never chosen.
           </p>
+
+          <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={pickAtCheckin}
+              onChange={(e) => setPickAtCheckin(e.target.checked)}
+            />
+            <span>
+              <span className="block text-sm font-medium text-gray-900">Pick a better seat at check-in</span>
+              <span className="block text-xs text-gray-500">
+                For every Southwest flight the app checks in. Experimental: it drives southwest.com in the
+                app&apos;s browser, with the local AI reading the seat map and confirming the change when
+                Southwest redesigns a page.
+              </span>
+            </span>
+          </label>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -322,6 +368,26 @@ export default function SettingsPage() {
                   </div>
                 </label>
               ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Rows to avoid</label>
+              <Input value={avoidRows} onChange={(e) => setAvoidRows(e.target.value)} placeholder="e.g. 29-30" />
+              <p className="text-xs text-gray-400 mt-1">Never moved into these (last rows that don&apos;t recline, by the galley)</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Also move forward by</label>
+              <Input
+                inputMode="numeric"
+                value={minRowGain}
+                onChange={(e) => setMinRowGain(e.target.value.replace(/\D/g, ""))}
+                placeholder="0"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Rows. For an equally good seat this many rows closer to the front (0 = only move for a better seat type)
+              </p>
             </div>
           </div>
 
@@ -594,6 +660,56 @@ export default function SettingsPage() {
           ) : (
             <p className="text-gray-500">Loading...</p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Flight data services */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Flight Data Services</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          {[
+            {
+              key: "flight_status" as const,
+              name: "Flight status (AeroDataBox)",
+              what: "Delay, gate change and cancellation alerts for Southwest and other-airline flights.",
+              env: "AERODATABOX_API_KEY",
+              how: "Sign up at rapidapi.com, subscribe to AeroDataBox on the free Basic plan, and copy your RapidAPI key.",
+              unit: "lookups",
+            },
+            {
+              key: "google_flights" as const,
+              name: "Prices on every airline (Google Flights via SerpApi)",
+              what: "Fare watches on all airlines, and price-drop alerts for trips you booked on other airlines.",
+              env: "SERPAPI_API_KEY",
+              how: "Sign up at serpapi.com (free plan: 250 searches a month) and copy your API key.",
+              unit: "searches",
+            },
+          ].map((svc) => {
+            const info = services?.[svc.key];
+            return (
+              <div key={svc.key} className="rounded-lg border border-gray-200 p-3 space-y-1">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-gray-900">{svc.name}</span>
+                  {info?.configured ? (
+                    <Badge variant="success">
+                      On · {info.used} of {info.limit} {svc.unit} this month
+                    </Badge>
+                  ) : (
+                    <Badge variant="inactive">Not set up</Badge>
+                  )}
+                </div>
+                <p className="text-gray-600">{svc.what}</p>
+                {!info?.configured && (
+                  <p className="text-xs text-gray-500">
+                    {svc.how} Add <code>{svc.env}=your-key</code> to the <code>.env</code> file in the app folder, then
+                    restart (<code>./macos/ctl.sh restart</code> on the Mac).
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
 

@@ -120,6 +120,15 @@ export function saveSegments(db: Database.Database, tripId: string, segments: Re
   );
 }
 
+export interface LiveStatus {
+  status: string;
+  scheduled_departure: string | null;
+  departure: string | null;
+  arrival: string | null;
+  gate: string;
+  terminal: string;
+}
+
 export interface TripRow {
   id: string;
   airline: string;
@@ -145,7 +154,12 @@ export interface TripRow {
     departure_time: string | null;
     arrival_local: string | null;
     seat: string;
+    live?: LiveStatus | null;
   }[];
+  current_price?: number | null;
+  current_price_exact?: number;
+  price_note?: string | null;
+  price_checked_at?: string | null;
   first_departure?: string | null;
 }
 
@@ -160,6 +174,20 @@ export function listTrips(db: Database.Database): TripRow[] {
     list.push(s);
     byTrip.set(s.trip_id, list);
   }
+  // Live status written by the worker (worker/lib/flight_status.py)
+  const statusRows = db
+    .prepare("SELECT key, value FROM system_state WHERE key LIKE 'flight_status:segment:%'")
+    .all() as { key: string; value: string }[];
+  const live = new Map<string, LiveStatus>();
+  for (const r of statusRows) {
+    try {
+      const last = JSON.parse(r.value)?.last;
+      if (last) live.set(r.key.slice("flight_status:segment:".length), last);
+    } catch {
+      // ignore a malformed row
+    }
+  }
+  for (const s of segs) s.live = live.get(s.id) ?? null;
   for (const t of trips) {
     t.segments = byTrip.get(t.id) ?? [];
     t.first_departure = t.segments[0]?.departure_time ?? t.segments[0]?.departure_local ?? null;
