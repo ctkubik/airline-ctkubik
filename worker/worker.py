@@ -1131,7 +1131,7 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                     current_url = driver.current_url
                     # Check for trip detail page indicators
                     if any(indicator in page_text for indicator in [
-                        "Modify seats", "Manage my trip", "Seat Assignments",
+                        "Modify seats", "modify seats", "Manage my trip", "Seat Assignments",
                         "Flight details", "Change seats", conf_num,
                     ]):
                         details_loaded = True
@@ -1165,32 +1165,19 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
 
                 # Click "Modify seats" link
                 audit.begin_step("click_modify_seats")
-                modify_result = driver.execute_script("""
-                    var links = document.querySelectorAll('a');
-                    for (var link of links) {
-                        var text = link.textContent.trim();
-                        if (text === 'Modify seats' || text === 'Modify Seats') {
-                            link.click();
-                            return 'clicked Modify seats';
-                        }
-                    }
-                    // Try buttons too
-                    var btns = document.querySelectorAll('button');
-                    for (var btn of btns) {
-                        var text = btn.textContent.trim();
-                        if (text === 'Modify seats' || text === 'Modify Seats') {
-                            btn.click();
-                            return 'clicked Modify seats (button)';
-                        }
-                    }
-                    // Diagnostics
-                    var allLinks = [];
-                    document.querySelectorAll('a').forEach(function(a) {
-                        var t = a.textContent.trim().substring(0, 30);
-                        if (t) allLinks.push(t);
-                    });
-                    return 'Modify seats not found. Links: ' + allLinks.join(' | ');
-                """)
+                modify_result = driver.execute_script(
+                    MODIFY_SEATS_JS,
+                    normalize_flight_number(flight_row.get("flight_number") or ""),
+                    flight_row["departure_airport"],
+                    flight_row.get("destination_airport") or "",
+                    False,
+                )
+                if str(modify_result).startswith("clicked"):
+                    # The link may open a short menu (Upgrade / Modify seats)
+                    time.sleep(3)
+                    follow = driver.execute_script(MODIFY_SEATS_JS, "", "", "", True)
+                    if str(follow).startswith("clicked"):
+                        modify_result = f"{modify_result}, then {follow}"
 
                 add_log(conn, f"Modify seats click: {str(modify_result)[:200]}", "info", flight_id)
 
@@ -1699,6 +1686,51 @@ def process_connection_tests(conn: sqlite3.Connection) -> None:
 
 class _SkipPhoneApp(Exception):
     """The phone-app service is off: the connection test skips that step."""
+
+
+# Clicks the link that opens seat changes on southwest.com's reservation page.
+# Southwest words it "Upgrade or modify seats" (earlier "Modify seats") and
+# shows one per flight, so the one whose section mentions this flight's number
+# or airports wins. arguments: flight number, from, to, menu_only (on a menu
+# that opened, pick the plain "Modify seats" choice and never "Upgrade").
+MODIFY_SEATS_JS = r"""
+var number = arguments[0], from = arguments[1], to = arguments[2], menuOnly = arguments[3];
+var re = menuOnly ? /^modify seats?$/i
+                  : /^((upgrade|change) (or|and|\/) )?(modify|change|select|choose) seats?$/i;
+var found = [];
+document.querySelectorAll('a, button, [role=button], [role=link], [role=menuitem]').forEach(function (el) {
+  var r = el.getBoundingClientRect();
+  var text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  if (r.width > 0 && r.height > 0 && !el.disabled && re.test(text)) found.push(el);
+});
+if (!found.length) {
+  if (menuOnly) return 'no menu';
+  var all = [];
+  document.querySelectorAll('a, button').forEach(function (a) {
+    var t = (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 30);
+    if (t) all.push(t);
+  });
+  return 'Modify seats not found. Links: ' + all.join(' | ');
+}
+function score(el) {
+  for (var node = el, i = 0; node && i < 10; node = node.parentElement, i++) {
+    var t = (node.innerText || '').toUpperCase();
+    // Stop at a section that holds every seat link (the whole page)
+    var links = node.querySelectorAll ? Array.prototype.filter.call(
+      node.querySelectorAll('a, button'), function (x) { return found.indexOf(x) >= 0; }).length : 0;
+    if (links > 1) return 0;
+    if (number && new RegExp('#\\s*' + number + '\\b').test(t)) return 3;
+    if (from && to && t.indexOf(from) >= 0 && t.indexOf(to) >= 0) return 2;
+    if (from && t.indexOf(from) >= 0) return 1;
+  }
+  return 0;
+}
+var best = found[0], bestScore = -1;
+found.forEach(function (el) { var s = score(el); if (s > bestScore) { best = el; bestScore = s; } });
+var label = (best.innerText || best.textContent || '').replace(/\s+/g, ' ').trim();
+best.click();
+return 'clicked ' + label + (found.length > 1 ? ' (' + found.length + ' on page, matched ' + ['first', 'airport', 'route', 'flight number'][bestScore] + ')' : '');
+"""
 
 
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
