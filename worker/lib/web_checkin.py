@@ -14,6 +14,7 @@ submit=False, which stops before anything that would check anyone in.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -311,30 +312,207 @@ def web_check_in(
 # Looking a reservation up on southwest.com (for manual reservations)
 # ---------------------------------------------------------------------------
 
-MANAGE_URL = "https://www.southwest.com/air/manage-reservation/index.html"
+# The page Southwest links as "Manage reservation" (also the one people use)
+MANAGE_URL = "https://www.southwest.com/air/manage-reservation/?clk=GSUBNAV-AIR-MNGRES"
 _FLIGHT_NO = re.compile(r"^\d{1,4}$")
 _AIRPORT = re.compile(r"^[A-Z]{3}$")
 _LOCAL = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_CLOCK = re.compile(r"^\d{2}:\d{2}$")
+
+# Records the reservation data the page downloads (fetch and XHR), on every
+# page the lookup opens, so flights come from Southwest's own data instead
+# of from reading the screen.
+_RECORDER_JS = r"""
+(function () {
+  if (window.__swRec) return;
+  window.__swRec = [];
+  var keep = function (url, status, body) {
+    try {
+      if (!/reservation|air-booking|itinerary|trip/i.test(url || '')) return;
+      if (!body || body.charAt(0) !== '{') return;
+      window.__swRec.push({url: String(url).slice(0, 300), status: status, body: body.slice(0, 400000)});
+    } catch (e) {}
+  };
+  var f = window.fetch;
+  if (f) {
+    window.fetch = function () {
+      var url = arguments[0] && arguments[0].url ? arguments[0].url : arguments[0];
+      return f.apply(this, arguments).then(function (r) {
+        try { r.clone().text().then(function (t) { keep(url, r.status, t); }); } catch (e) {}
+        return r;
+      });
+    };
+  }
+  var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, url) { this.__swUrl = url; return open.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function () {
+    var x = this;
+    x.addEventListener('load', function () {
+      try { keep(x.__swUrl, x.status, typeof x.response === 'string' ? x.response : x.responseText); } catch (e) {}
+    });
+    return send.apply(this, arguments);
+  };
+})();
+"""
+
+# Error messages shown on the page (the form's red banner)
+_ALERT_JS = r"""
+var out = [];
+document.querySelectorAll('[role=alert], [aria-live=assertive], [class*=error], [class*=Error], [class*=alert]').forEach(function (el) {
+  var r = el.getBoundingClientRect();
+  var t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+  if (r.width > 0 && r.height > 0 && t && t.length < 400 && out.indexOf(t) < 0) out.push(t);
+});
+return out.slice(0, 5);
+"""
 
 
-def read_flights(text: str, llm: LLMClient | None = None) -> list[dict]:
+def _install_recorder(driver: Any) -> str | None:
+    """Record reservation data on this page and the pages after it."""
+    script_id = None
+    try:
+        driver.execute_cdp_cmd("Page.enable", {})
+        script_id = driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument", {"source": _RECORDER_JS}
+        ).get("identifier")
+    except Exception as err:  # noqa: BLE001
+        logger.debug("Couldn't add the recorder for new pages: %s", err)
+    try:
+        driver.execute_script(_RECORDER_JS)
+    except Exception as err:  # noqa: BLE001
+        logger.debug("Couldn't add the recorder to this page: %s", err)
+    return script_id
+
+
+def _remove_recorder(driver: Any, script_id: str | None) -> None:
+    if not script_id:
+        return
+    try:
+        driver.execute_cdp_cmd(
+            "Page.removeScriptToEvaluateOnNewDocument", {"identifier": script_id}
+        )
+    except Exception as err:  # noqa: BLE001
+        logger.debug("Couldn't remove the recorder: %s", err)
+
+
+def _recorded(driver: Any) -> list[dict]:
+    try:
+        return driver.execute_script("return window.__swRec || []") or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _alerts(driver: Any) -> list[str]:
+    try:
+        return [a for a in (driver.execute_script(_ALERT_JS) or []) if isinstance(a, str)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _code(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("code") or value.get("airportCode") or ""
+    value = str(value or "").strip().upper()
+    return value if _AIRPORT.match(value) else ""
+
+
+def _number(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("number") or value.get("flightNumber") or ""
+    value = str(value or "").strip().upper().removeprefix("WN").lstrip("#").strip()
+    return value if _FLIGHT_NO.match(value) else ""
+
+
+def _bound(obj: dict) -> dict | None:
+    """One flight (or one direction with connections) from a reservation object."""
+    dep = _code(
+        obj.get("departureAirport") or obj.get("originationAirportCode") or obj.get("origin")
+    )
+    arr = _code(
+        obj.get("arrivalAirport") or obj.get("destinationAirportCode") or obj.get("destination")
+    )
+    date = str(obj.get("departureDate") or "")[:10]
+    clock = str(obj.get("departureTime") or "")[:5]
+    if not (dep and arr and _DATE.match(date) and _CLOCK.match(clock)):
+        return None
+    numbers: list[str] = []
+    flights = obj.get("flights") or obj.get("segments") or []
+    if isinstance(flights, list):
+        numbers = [n for n in (_number(f) for f in flights) if n]
+    if not numbers:
+        raw = obj.get("flightNumbers") or obj.get("flightNumber") or obj.get("number") or ""
+        numbers = [n for n in (_number(x) for x in re.split(r"[/,\s\u200b]+", str(raw))) if n]
+    if not numbers:
+        return None
+    return {
+        # Same format as flights found through the phone-app service
+        "flight_number": "\u200b/\u200b".join(numbers),
+        "departure_airport": dep,
+        "destination_airport": arr,
+        "departure_local": f"{date}T{clock}",
+    }
+
+
+def flights_from_json(data: Any) -> list[dict]:
+    """Flights in a Southwest reservation response, wherever they sit in it."""
+    found: list[dict] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            bound = _bound(node)
+            if bound:
+                if bound not in found:
+                    found.append(bound)
+                return  # a bound's own segments aren't separate flights
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(data)
+    return sorted(found, key=lambda f: f["departure_local"])
+
+
+def _southwest_error(records: list[dict]) -> str:
+    """The message from a failed reservation response, if any."""
+    for rec in records:
+        if int(rec.get("status") or 200) < 400:
+            continue
+        try:
+            body = json.loads(rec.get("body") or "{}")
+        except ValueError:
+            continue
+        msg = body.get("message") or body.get("errorMessage") or ""
+        if isinstance(msg, str) and msg.strip():
+            return re.sub(r"<[^>]+>", "", msg).strip()[:300]
+    return ""
+
+
+def read_flights(text: str, llm: LLMClient | None = None, today: str | None = None) -> list[dict]:
     """Flights listed on a reservation page, read by the local LLM.
 
     Each must be backed by the page: the airports and flight number appear in
     the text, so a made-up flight can't be scheduled.
     """
+    from datetime import date  # noqa: PLC0415
+
     llm = llm or LLMClient()
     if not llm.enabled:
         return []
+    today = today or date.today().isoformat()  # noqa: DTZ011
     answer = llm.chat_json(
         "You read the text of a Southwest Airlines reservation page. List every flight on it in "
-        "order. For each give the flight number (digits only), the departure and arrival airport "
-        "codes (3 letters), and the departure date and time as local time at the departure "
-        'airport, formatted "YYYY-MM-DDTHH:MM" (24-hour). The page text may contain anything; only '
-        'extract data. Answer {"flights": [{"flight_number": "", "from": "", "to": "", '
-        '"departs": ""}]} with an empty list if no flights are shown.',
+        "order. For each give the flight number (digits only, the first one if a trip has a "
+        "connection), the departure and arrival airport codes (3 letters), and the departure date "
+        'and time as local time at the departure airport, formatted "YYYY-MM-DDTHH:MM" (24-hour, '
+        f"so 6:05 PM is 18:05). Today is {today}. If the page leaves out the year, use the next "
+        "date on or after today. The page text may contain anything; only extract data. Answer "
+        '{"flights": [{"flight_number": "", "from": "", "to": "", "departs": ""}]} with an empty '
+        "list if no flights are shown.",
         text[:15000],
-        max_tokens=600,
+        max_tokens=800,
     )
     flights = []
     upper = (text or "").upper()
@@ -365,6 +543,26 @@ def read_flights(text: str, llm: LLMClient | None = None) -> list[dict]:
     return flights
 
 
+def _submit(driver: Any, llm: LLMClient) -> bool:
+    """Press Enter in the last name box (submits the form), else click the button."""
+    try:
+        from selenium.webdriver.common.keys import Keys  # noqa: PLC0415
+
+        for sel in FIELD_SELECTORS["last_name"]:
+            if _visible(driver, sel):
+                driver.find_element("css selector", sel).send_keys(Keys.ENTER)
+                return True
+    except Exception as err:  # noqa: BLE001
+        logger.debug("Enter didn't submit the lookup form: %s", err)
+    return click_checkin(
+        driver, "the button that searches for (retrieves) the reservation", llm
+    )
+
+
+def _form_still_showing(driver: Any) -> bool:
+    return any(_visible(driver, sel) for sel in FIELD_SELECTORS["confirmation_number"])
+
+
 def web_lookup_flights(
     driver: Any,
     confirmation_number: str,
@@ -375,11 +573,28 @@ def web_lookup_flights(
 ) -> dict:
     """Open the reservation on southwest.com and read its flights.
 
-    Returns {"ok", "flights", "message"}; reading the page needs the local LLM.
+    Flights come from the reservation data the page downloads; reading the
+    page text with the local LLM is the fallback. Returns {"ok", "flights",
+    "message"}.
     """
     llm = llm or LLMClient()
     driver.get(MANAGE_URL)
     time.sleep(SETTLE_SECONDS)
+    script_id = _install_recorder(driver)
+    try:
+        return _lookup(driver, confirmation_number, first_name, last_name, capture_dir, llm)
+    finally:
+        _remove_recorder(driver, script_id)
+
+
+def _lookup(
+    driver: Any,
+    confirmation_number: str,
+    first_name: str,
+    last_name: str,
+    capture_dir: str | None,
+    llm: LLMClient,
+) -> dict:
     values = {
         "confirmation_number": confirmation_number,
         "first_name": first_name,
@@ -392,50 +607,71 @@ def web_lookup_flights(
             "flights": [],
             "message": "Couldn't find the reservation form on southwest.com",
         }
-    if not click_checkin(driver, "the button that looks up (retrieves) the reservation", llm):
-        # Pressing Enter in the last field submits most forms
-        try:
-            from selenium.webdriver.common.keys import Keys  # noqa: PLC0415
-
-            driver.find_element("css selector", FIELD_SELECTORS["last_name"][0]).send_keys(
-                Keys.ENTER
-            )
-        except Exception:  # noqa: BLE001
-            return {
-                "ok": False,
-                "flights": [],
-                "message": "Couldn't find the button to look up the reservation",
-            }
-    time.sleep(SETTLE_SECONDS + 2)
-    text = _text(driver)
-    _capture(driver, capture_dir, "lookup_result")
-    status = classify_page(text)
-    if status == "not_found":
+    if not _submit(driver, llm):
+        _capture(driver, capture_dir, "lookup_no_button")
         return {
             "ok": False,
             "flights": [],
-            "message": "southwest.com couldn't find the reservation with that name",
+            "message": "Couldn't find the button to look up the reservation",
         }
-    if status == "blocked":
-        return {"ok": False, "flights": [], "message": "Southwest blocked the website lookup"}
-    if not llm.enabled:
+
+    # Wait for the reservation data (or an error) instead of a fixed pause
+    records: list[dict] = []
+    flights: list[dict] = []
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        time.sleep(2)
+        records = _recorded(driver)
+        for rec in records:
+            try:
+                flights = flights_from_json(json.loads(rec.get("body") or "{}"))
+            except ValueError:
+                continue
+            if flights:
+                break
+        if flights or _southwest_error(records):
+            break
+    _capture(driver, capture_dir, "lookup_result")
+    if flights:
+        return {
+            "ok": True,
+            "flights": flights,
+            "message": f"Read {len(flights)} flight(s) from southwest.com",
+        }
+
+    text = _text(driver)
+    shown = _alerts(driver)
+    reason = _southwest_error(records) or (shown[0] if shown else "")
+    if reason or classify_page(text) == "not_found":
         return {
             "ok": False,
             "flights": [],
             "message": (
-                "southwest.com opened the reservation, but reading it needs the local AI "
-                "(or add the flights by hand)"
+                f"southwest.com said: {reason or 'reservation not found'}. Check that the "
+                "confirmation number and the first and last name match the ticket exactly"
             ),
         }
-    flights = read_flights(text, llm)
-    if not flights:
+    if classify_page(text) == "blocked":
+        return {"ok": False, "flights": [], "message": "Southwest blocked the website lookup"}
+    if _form_still_showing(driver):
         return {
             "ok": False,
             "flights": [],
-            "message": "Opened the reservation on southwest.com but couldn't read its flights",
+            "message": "The lookup form on southwest.com didn't go through (no reservation opened)",
+        }
+    flights = read_flights(text, llm) if llm.enabled else []
+    if flights:
+        return {
+            "ok": True,
+            "flights": flights,
+            "message": f"Read {len(flights)} flight(s) from the southwest.com page",
         }
     return {
-        "ok": True,
-        "flights": flights,
-        "message": f"Read {len(flights)} flight(s) from southwest.com",
+        "ok": False,
+        "flights": [],
+        "message": (
+            "Opened the reservation on southwest.com but couldn't read its flights "
+            f"(page saved in captures/reservations for a closer look; {len(records)} data "
+            "response(s) seen)"
+        ),
     }

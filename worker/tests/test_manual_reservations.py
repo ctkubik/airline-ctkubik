@@ -140,3 +140,154 @@ def test_read_flights_only_keeps_what_the_page_shows() -> None:
             "departure_local": "2099-11-20T08:00",
         }
     ]
+
+
+# Shaped like the reservation data southwest.com downloads (trimmed)
+VIEW_RESERVATION = {
+    "data": {
+        "searchResults": {
+            "reservation": {
+                "confirmationNumber": "ABC123",
+                "bounds": [
+                    {
+                        "departureDate": "2099-11-20",
+                        "departureTime": "08:00",
+                        "departureAirport": {"code": "PHX", "name": "Phoenix"},
+                        "arrivalAirport": {"code": "MDW"},
+                        "flights": [{"number": "WN1234"}, {"number": "WN56"}],
+                        "stops": [{"airport": {"code": "DEN"}}],
+                    },
+                    {
+                        "departureDate": "2099-11-24",
+                        "departureTime": "17:35",
+                        "departureAirport": {"code": "MDW"},
+                        "arrivalAirport": {"code": "PHX"},
+                        "flightNumbers": "789",
+                    },
+                ],
+            }
+        }
+    }
+}
+
+
+def test_flights_from_json_reads_bounds_and_connections() -> None:
+    assert wc.flights_from_json(VIEW_RESERVATION) == [
+        {
+            "flight_number": "1234​/​56",
+            "departure_airport": "PHX",
+            "destination_airport": "MDW",
+            "departure_local": "2099-11-20T08:00",
+        },
+        {
+            "flight_number": "789",
+            "departure_airport": "MDW",
+            "destination_airport": "PHX",
+            "departure_local": "2099-11-24T17:35",
+        },
+    ]
+    assert wc.flights_from_json({"code": 400, "message": "nope"}) == []
+
+
+class FakeDriver:
+    """Enough of a browser for web_lookup_flights."""
+
+    def __init__(self, records: list, alerts: list | None = None, form_after: bool = False) -> None:
+        self.records = records
+        self.alerts = alerts or []
+        self.form_after = form_after
+        self.submitted = False
+        self.typed: dict = {}
+        self.cdp: list = []
+
+    def get(self, url: str) -> None:
+        self.url = url
+
+    def execute_cdp_cmd(self, cmd: str, params: dict) -> dict:
+        self.cdp.append(cmd)
+        return {"identifier": "1"}
+
+    def execute_script(self, script: str, *args) -> object:
+        if "__swRec ||" in script:
+            return self.records if self.submitted else []
+        if "role=alert" in script:
+            return self.alerts
+        if "innerText : ''" in script:
+            return "Manage reservation"
+        return None
+
+    def is_element_visible(self, sel: str) -> bool:
+        if self.submitted and not self.form_after:
+            return False
+        return sel in (
+            'input[id="confirmationNumber"]',
+            'input[id="passengerFirstName"]',
+            'input[id="passengerLastName"]',
+        )
+
+    def type(self, sel: str, value: str) -> None:
+        self.typed[sel] = value
+
+    def find_element(self, by: str, sel: str):  # noqa: ANN201
+        driver = self
+
+        class El:
+            def send_keys(self, keys: str) -> None:
+                driver.submitted = True
+
+        return El()
+
+    def save_screenshot(self, path: str) -> None:
+        pass
+
+
+@pytest.fixture
+def fast(monkeypatch):  # noqa: ANN001, ANN201
+    monkeypatch.setattr(wc, "SETTLE_SECONDS", 0)
+    monkeypatch.setattr(wc.time, "sleep", lambda s: None)
+
+
+class NoLLM:
+    enabled = False
+
+
+@pytest.mark.usefixtures("fast")
+def test_website_lookup_reads_southwest_data_without_ai() -> None:
+    import json
+
+    driver = FakeDriver([
+        {"url": "/api/other", "status": 200, "body": "{}"},
+        {"url": "/api/air-booking/v1/view-reservation", "status": 200, "body": json.dumps(VIEW_RESERVATION)},
+    ])
+    result = wc.web_lookup_flights(driver, "ABC123", "Pat", "K", llm=NoLLM())
+    assert result["ok"] is True
+    assert [f["departure_airport"] for f in result["flights"]] == ["PHX", "MDW"]
+    assert driver.url == wc.MANAGE_URL
+    assert driver.typed['input[id="confirmationNumber"]'] == "ABC123"
+    assert "Page.removeScriptToEvaluateOnNewDocument" in driver.cdp
+
+
+@pytest.mark.usefixtures("fast")
+def test_website_lookup_reports_southwest_error_message() -> None:
+    body = '{"code": 400620389, "message": "We were unable to retrieve your reservation."}'
+    driver = FakeDriver([{"url": "/api/view-reservation", "status": 400, "body": body}])
+    result = wc.web_lookup_flights(driver, "ABC123", "Pat", "K", llm=NoLLM())
+    assert result["ok"] is False
+    assert "unable to retrieve your reservation" in result["message"]
+    assert "match the ticket exactly" in result["message"]
+
+
+@pytest.mark.usefixtures("fast")
+def test_website_lookup_says_when_form_did_not_submit(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(wc.time, "time", iter(range(0, 1000, 10)).__next__)
+    driver = FakeDriver([], form_after=True)
+    result = wc.web_lookup_flights(driver, "ABC123", "Pat", "K", llm=NoLLM())
+    assert "didn't go through" in result["message"]
+
+
+@pytest.mark.usefixtures("fast")
+def test_website_lookup_shows_red_banner_text(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(wc.time, "time", iter(range(0, 1000, 10)).__next__)
+    driver = FakeDriver([], alerts=["Please double-check the passenger name."])
+    result = wc.web_lookup_flights(driver, "ABC123", "Pat", "K", llm=NoLLM())
+    assert "double-check the passenger name" in result["message"]
