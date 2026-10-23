@@ -425,7 +425,7 @@ def _set_lookup(conn: sqlite3.Connection, res_id: str, status: str, message: str
     conn.execute(
         "UPDATE reservations SET lookup_status = ?, lookup_message = ?, lookup_checked_at = ?, "
         "next_lookup_at = ?, lookup_failures = ? WHERE id = ?",
-        (status, message[:500], now.isoformat(), (now + timedelta(minutes=retry_minutes)).isoformat(), failures, res_id),
+        (status, message[:1200], now.isoformat(), (now + timedelta(minutes=retry_minutes)).isoformat(), failures, res_id),
     )
     conn.commit()
 

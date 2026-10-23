@@ -296,3 +296,85 @@ def test_website_lookup_shows_red_banner_text(monkeypatch) -> None:  # noqa: ANN
     driver = FakeDriver([], alerts=["Please double-check the passenger name."])
     result = wc.web_lookup_flights(driver, "ABC123", "Pat", "K", llm=NoLLM())
     assert "double-check the passenger name" in result["message"]
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        # ISO date-time with the airport's offset: the local part is kept
+        (
+            {"originationAirportCode": "PHX", "destinationAirportCode": "DEN",
+             "departureDateTime": "2099-03-01T18:05:00.000-07:00", "flightNumbers": "WN 1234"},
+            ("1234", "PHX", "DEN", "2099-03-01T18:05"),
+        ),
+        # 12-hour clock and a US date
+        (
+            {"departureAirport": {"code": "LAS"}, "arrivalAirport": {"airportCode": "OAK"},
+             "departureDate": "03/02/99", "departureTime": "6:05 PM", "flightNumber": "77"},
+            ("77", "LAS", "OAK", "2099-03-02T18:05"),
+        ),
+        # Number missing: still a flight (check-in uses the confirmation number)
+        (
+            {"origin": "MDW", "destination": "BWI", "departureDate": "2099-03-03", "departureTime": "0730"},
+            ("", "MDW", "BWI", "2099-03-03T07:30"),
+        ),
+    ],
+)
+def test_flights_from_json_other_shapes(item: dict, expected: tuple) -> None:
+    flights = wc.flights_from_json({"wrapper": {"trip": [item]}})
+    assert [tuple(f.values()) for f in flights] == [expected]
+
+
+def test_flights_from_json_ignores_things_that_are_not_flights() -> None:
+    assert wc.flights_from_json({"origin": "USA", "destination": "XYZ", "departureDate": "2099-01-01", "departureTime": "08:00"}) == []
+    assert wc.flights_from_json({"searchResults": {"fare": "$129", "departureDate": "2099-01-01"}}) == []
+
+
+PAGE = """Manage reservation
+Confirmation # ABC123
+Pat K
+DEPARTING FLIGHT
+Fri, Nov 20
+Flight # 1234
+PHX 8:00AM
+Phoenix, AZ
+MDW 1:05PM
+Chicago (Midway), IL
+Nonstop
+RETURNING FLIGHT
+Tue, Nov 24
+# 88 / 431
+MDW 5:35PM  Change planes DEN
+PHX 9:10PM
+Total USD $412.00
+"""
+
+
+def test_flights_from_text_reads_dates_times_and_codes() -> None:
+    assert wc.flights_from_text(PAGE, today="2099-10-23") == [
+        {"flight_number": "1234", "departure_airport": "PHX", "destination_airport": "MDW",
+         "departure_local": "2099-11-20T08:00"},
+        {"flight_number": "88", "departure_airport": "MDW", "destination_airport": "DEN",
+         "departure_local": "2099-11-24T17:35"},
+    ]
+    # No year on the page and the date already passed this year: next year
+    assert wc.flights_from_text("Jan 5\nFlight 9\nPHX 6:00 AM LAS", today="2099-10-23")[0][
+        "departure_local"
+    ] == "2100-01-05T06:00"
+
+
+@pytest.mark.usefixtures("fast")
+def test_website_lookup_falls_back_to_page_text_and_explains_failures(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(wc.time, "time", iter(range(0, 1000, 10)).__next__)
+    driver = FakeDriver([{"url": "https://www.southwest.com/api/x/trip-status?y=1", "status": 200, "body": '{"data": {"status": {"a": 1}}}'}])
+    monkeypatch.setattr(wc, "_text", lambda d: PAGE)
+    result = wc.web_lookup_flights(driver, "ABC123", "Pat", "K", llm=NoLLM())
+    assert result["ok"] and len(result["flights"]) == 2
+    # Nothing readable anywhere: the message says what came back
+    monkeypatch.setattr(wc.time, "time", iter(range(0, 1000, 10)).__next__)
+    monkeypatch.setattr(wc, "_text", lambda d: "Manage reservation  Your trip")
+    driver = FakeDriver([{"url": "https://www.southwest.com/api/x/trip-status?y=1", "status": 200, "body": '{"data": {"status": {"a": 1}}}'}])
+    result = wc.web_lookup_flights(driver, "ABC123", "Pat", "K", llm=NoLLM())
+    assert not result["ok"]
+    assert "/api/x/trip-status (status 200) shaped {data:{status:{a}}}" in result["message"]
+    assert 'page starts "Manage reservation Your trip"' in result["message"]

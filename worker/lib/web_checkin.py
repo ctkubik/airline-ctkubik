@@ -410,48 +410,198 @@ def _alerts(driver: Any) -> list[str]:
         return []
 
 
+_KNOWN_AIRPORTS: set[str] | None = None
+
+
+def known_airports() -> set[str]:
+    """Airport codes the app knows a time zone for (it can't schedule others)."""
+    global _KNOWN_AIRPORTS  # noqa: PLW0603
+    if _KNOWN_AIRPORTS is None:
+        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "utils", "airport_timezones.json")
+        try:
+            with open(path) as fh:
+                _KNOWN_AIRPORTS = set(json.load(fh))
+        except (OSError, ValueError):
+            _KNOWN_AIRPORTS = set()
+    return _KNOWN_AIRPORTS
+
+
+def _pick(obj: dict, names: tuple[str, ...]) -> Any:
+    """obj[name] for the first name present, ignoring case."""
+    lower = {k.lower(): v for k, v in obj.items() if isinstance(k, str)}
+    for name in names:
+        value = lower.get(name.lower())
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
 def _code(value: Any) -> str:
     if isinstance(value, dict):
-        value = value.get("code") or value.get("airportCode") or ""
+        value = _pick(value, ("code", "airportCode", "stationCode", "iata", "id"))
     value = str(value or "").strip().upper()
-    return value if _AIRPORT.match(value) else ""
+    if not _AIRPORT.match(value):
+        return ""
+    known = known_airports()
+    return value if not known or value in known else ""
 
 
 def _number(value: Any) -> str:
     if isinstance(value, dict):
-        value = value.get("number") or value.get("flightNumber") or ""
-    value = str(value or "").strip().upper().removeprefix("WN").lstrip("#").strip()
+        value = _pick(value, ("number", "flightNumber", "marketingFlightNumber", "operatingFlightNumber"))
+    value = str(value or "").strip().upper().replace("WN", "").lstrip("#").strip()
     return value if _FLIGHT_NO.match(value) else ""
+
+
+_DEP_AIRPORT = (
+    "departureAirport", "departureAirportCode", "originationAirportCode", "originationAirport",
+    "originAirportCode", "originAirport", "origin", "departureStation", "departureStationCode",
+    "fromAirportCode", "fromAirport", "from",
+)
+_ARR_AIRPORT = (
+    "arrivalAirport", "arrivalAirportCode", "destinationAirportCode", "destinationAirport",
+    "destination", "arrivalStation", "arrivalStationCode", "toAirportCode", "toAirport", "to",
+)
+_DEP_DATETIME = (
+    "departureDateTime", "departureLocalDateTime", "localDepartureDateTime",
+    "scheduledDepartureDateTime", "departureDateTimeLocal", "departsAt",
+)
+_ISO_LOCAL = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})")
+_US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
+_CLOCK_12 = re.compile(r"^(\d{1,2}):?(\d{2})(?::\d{2})?\s*([AaPp])?\.?[Mm]?\.?$")
+
+
+def _clock(value: Any) -> str:
+    """'06:05', '6:05 AM', '6:05PM', '0605', '18:05:00' -> '06:05' / '18:05'."""
+    m = _CLOCK_12.match(str(value or "").strip())
+    if not m:
+        return ""
+    hour, minute, half = int(m.group(1)), int(m.group(2)), (m.group(3) or "").upper()
+    if half == "P" and hour < 12:
+        hour += 12
+    if half == "A" and hour == 12:
+        hour = 0
+    return f"{hour:02d}:{minute:02d}" if hour < 24 and minute < 60 else ""
+
+
+def _day(value: Any) -> str:
+    """'2026-11-20', '2026-11-20T…', '11/20/2026' or '11/20/26' -> '2026-11-20'."""
+    text = str(value or "").strip()
+    if _DATE.match(text[:10]):
+        return text[:10]
+    m = _US_DATE.match(text)
+    if m:
+        year = int(m.group(3))
+        year = year + 2000 if year < 100 else year
+        return f"{year:04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    return ""
+
+
+def _departure_local(obj: dict) -> str:
+    stamp = _pick(obj, _DEP_DATETIME)
+    if isinstance(stamp, str):
+        m = _ISO_LOCAL.match(stamp.strip())
+        if m:
+            # Local time at the airport: the offset after it is dropped on purpose
+            return f"{m.group(1)}T{m.group(2)}"
+    day = _day(_pick(obj, ("departureDate", "departureLocalDate", "date", "departDate")))
+    clock = _clock(_pick(obj, ("departureTime", "departureLocalTime", "departTime", "time")))
+    return f"{day}T{clock}" if day and clock else ""
 
 
 def _bound(obj: dict) -> dict | None:
     """One flight (or one direction with connections) from a reservation object."""
-    dep = _code(
-        obj.get("departureAirport") or obj.get("originationAirportCode") or obj.get("origin")
-    )
-    arr = _code(
-        obj.get("arrivalAirport") or obj.get("destinationAirportCode") or obj.get("destination")
-    )
-    date = str(obj.get("departureDate") or "")[:10]
-    clock = str(obj.get("departureTime") or "")[:5]
-    if not (dep and arr and _DATE.match(date) and _CLOCK.match(clock)):
+    dep = _code(_pick(obj, _DEP_AIRPORT))
+    arr = _code(_pick(obj, _ARR_AIRPORT))
+    when = _departure_local(obj)
+    if not (dep and arr and dep != arr and when):
         return None
     numbers: list[str] = []
-    flights = obj.get("flights") or obj.get("segments") or []
+    flights = _pick(obj, ("flights", "segments", "legs"))
     if isinstance(flights, list):
         numbers = [n for n in (_number(f) for f in flights) if n]
     if not numbers:
-        raw = obj.get("flightNumbers") or obj.get("flightNumber") or obj.get("number") or ""
+        raw = _pick(obj, ("flightNumbers", "flightNumber", "number", "marketingFlightNumber")) or ""
         numbers = [n for n in (_number(x) for x in re.split(r"[/,\s\u200b]+", str(raw))) if n]
-    if not numbers:
-        return None
     return {
         # Same format as flights found through the phone-app service
         "flight_number": "\u200b/\u200b".join(numbers),
         "departure_airport": dep,
         "destination_airport": arr,
-        "departure_local": f"{date}T{clock}",
+        "departure_local": when,
     }
+
+
+_MONTHS = "jan feb mar apr may jun jul aug sep oct nov dec".split()
+_TEXT_DATE = re.compile(
+    r"\b(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+)?"
+    r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?"
+    r"(?:,?\s+(\d{4}))?\b"
+    r"|\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b",
+    re.IGNORECASE,
+)
+_TEXT_TIME = re.compile(r"\b(\d{1,2}):(\d{2})\s*([AaPp])\.?\s*[Mm]\.?")
+_TEXT_FLIGHT = re.compile(r"(?:#|\bflight\s*(?:#|no\.?|number)?)\s*(\d{1,4})\b", re.IGNORECASE)
+_TEXT_CODE = re.compile(r"\b[A-Z]{3}\b")
+
+
+def flights_from_text(text: str, today: str | None = None) -> list[dict]:
+    """Flights read straight from the reservation page's text, no AI needed.
+
+    The page lists each flight under its date: the first time after the date
+    is the departure, the first two airport codes are from and to.
+    """
+    from datetime import date  # noqa: PLC0415
+
+    today_d = date.fromisoformat(today) if today else date.today()  # noqa: DTZ011
+    known = known_airports()
+    marks = list(_TEXT_DATE.finditer(text or ""))
+    found: list[dict] = []
+    for i, m in enumerate(marks):
+        block = text[m.end(): marks[i + 1].start() if i + 1 < len(marks) else len(text)]
+        try:
+            if m.group(1):
+                month, day = _MONTHS.index(m.group(1).lower()[:3]) + 1, int(m.group(2))
+                year = int(m.group(3)) if m.group(3) else None
+            else:
+                month, day, year = int(m.group(4)), int(m.group(5)), int(m.group(6))
+                year = year + 2000 if year < 100 else year
+            if year is None:
+                year = today_d.year
+                if date(year, month, day) < today_d:
+                    year += 1
+            flight_day = date(year, month, day)
+        except ValueError:
+            continue
+        codes = [c for c in _TEXT_CODE.findall(block) if c in known]
+        codes = list(dict.fromkeys(codes))
+        t = _TEXT_TIME.search(block)
+        if len(codes) < 2 or not t:
+            continue
+        clock = _clock(f"{t.group(1)}:{t.group(2)} {t.group(3)}M")
+        number = _TEXT_FLIGHT.search(block) or _TEXT_FLIGHT.search(text[max(0, m.start() - 200): m.start()])
+        flight = {
+            "flight_number": number.group(1) if number else "",
+            "departure_airport": codes[0],
+            "destination_airport": codes[1],
+            "departure_local": f"{flight_day.isoformat()}T{clock}",
+        }
+        if clock and flight not in found:
+            found.append(flight)
+    return sorted(found, key=lambda f: f["departure_local"])
+
+
+def _outline(data: Any, depth: int = 0) -> str:
+    """The shape of a JSON response (key names only, no values) for error messages."""
+    if depth > 3:
+        return "…"
+    if isinstance(data, dict):
+        inner = ",".join(f"{k}:{_outline(v, depth + 1)}" if isinstance(v, (dict, list)) else str(k)
+                         for k in list(data)[:8] for v in [data[k]])
+        return "{" + inner + "}"
+    if isinstance(data, list):
+        return "[" + (_outline(data[0], depth + 1) if data else "") + "]"
+    return ""
 
 
 def flights_from_json(data: Any) -> list[dict]:
@@ -559,6 +709,63 @@ def _submit(driver: Any, llm: LLMClient) -> bool:
     )
 
 
+_EMBEDDED_JS = r"""
+var out = [];
+document.querySelectorAll('script[type="application/json"], script#__NEXT_DATA__').forEach(function (el) {
+  var t = (el.textContent || '').trim();
+  if (t.charAt(0) === '{' && t.length < 2000000) out.push(t);
+});
+['__INITIAL_STATE__', '__PRELOADED_STATE__', '__APOLLO_STATE__', 'data'].forEach(function (name) {
+  try {
+    var v = window[name];
+    if (v && typeof v === 'object') { var t = JSON.stringify(v); if (t.length < 2000000) out.push(t); }
+  } catch (e) {}
+});
+return out.slice(0, 10);
+"""
+
+
+def _embedded_data(driver: Any) -> list[Any]:
+    try:
+        blobs = driver.execute_script(_EMBEDDED_JS) or []
+    except Exception:  # noqa: BLE001
+        return []
+    data = []
+    for blob in blobs:
+        try:
+            data.append(json.loads(blob))
+        except (TypeError, ValueError):
+            continue
+    return data
+
+
+def _save_records(records: list[dict], capture_dir: str | None) -> None:
+    """Keep the reservation data the page downloaded, to diagnose a page change."""
+    if not capture_dir:
+        return
+    try:
+        os.makedirs(capture_dir, exist_ok=True)
+        with open(os.path.join(capture_dir, "lookup_data.json"), "w") as fh:
+            json.dump(records, fh, indent=1)
+    except OSError as err:
+        logger.debug("Couldn't save the lookup data: %s", err)
+
+
+def _what_came_back(records: list[dict], text: str) -> str:
+    """A short description of what southwest.com returned, for the error message."""
+    parts = []
+    for rec in records[:2]:
+        path = re.sub(r"^https?://[^/]+", "", str(rec.get("url") or "")).split("?")[0]
+        try:
+            shape = _outline(json.loads(rec.get("body") or "{}"))
+        except ValueError:
+            shape = "(not JSON)"
+        parts.append(f"data from {path} (status {rec.get('status')}) shaped {shape[:240]}")
+    words = " ".join((text or "").split())[:160]
+    parts.append(f'page starts "{words}"')
+    return "What came back: " + "; ".join(parts) + ". Saved in data/captures/reservations."
+
+
 def _form_still_showing(driver: Any) -> bool:
     return any(_visible(driver, sel) for sel in FIELD_SELECTORS["confirmation_number"])
 
@@ -632,12 +839,22 @@ def _lookup(
         if flights or _southwest_error(records):
             break
     _capture(driver, capture_dir, "lookup_result")
+    _save_records(records, capture_dir)
     if flights:
         return {
             "ok": True,
             "flights": flights,
             "message": f"Read {len(flights)} flight(s) from southwest.com",
         }
+    # Some pages carry the reservation inside the page instead of downloading it
+    for blob in _embedded_data(driver):
+        flights = flights_from_json(blob)
+        if flights:
+            return {
+                "ok": True,
+                "flights": flights,
+                "message": f"Read {len(flights)} flight(s) from southwest.com",
+            }
 
     text = _text(driver)
     shown = _alerts(driver)
@@ -659,7 +876,9 @@ def _lookup(
             "flights": [],
             "message": "The lookup form on southwest.com didn't go through (no reservation opened)",
         }
-    flights = read_flights(text, llm) if llm.enabled else []
+    flights = flights_from_text(text)
+    if not flights and llm.enabled:
+        flights = read_flights(text, llm)
     if flights:
         return {
             "ok": True,
@@ -669,9 +888,6 @@ def _lookup(
     return {
         "ok": False,
         "flights": [],
-        "message": (
-            "Opened the reservation on southwest.com but couldn't read its flights "
-            f"(page saved in captures/reservations for a closer look; {len(records)} data "
-            "response(s) seen)"
-        ),
+        "message": "Opened the reservation on southwest.com but couldn't read its flights. "
+        + _what_came_back(records, text),
     }
