@@ -1,8 +1,9 @@
 # ruff: noqa: SLF001 - exercising the listener directly
 from __future__ import annotations
 
-from lib import browser_session as bs
 from lib.browser_session import API_BASE_URL, MOBILE_HEADERS_URL, BrowserSession
+
+from lib import browser_session as bs
 
 WAF = {
     "X-API-Key": "k",
