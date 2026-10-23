@@ -1,4 +1,4 @@
-# ruff: noqa: SLF001, DTZ003 - driving the handler directly with fixed times
+# ruff: noqa: SLF001, DTZ001, DTZ003, E501 - driving the handler directly with fixed times; long SQL
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone

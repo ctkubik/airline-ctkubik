@@ -1,6 +1,7 @@
 # ruff: noqa: SLF001 - exercising the listener directly
 from __future__ import annotations
 
+from lib import browser_session as bs
 from lib.browser_session import API_BASE_URL, MOBILE_HEADERS_URL, BrowserSession
 
 WAF = {
@@ -58,8 +59,6 @@ class FakeDriver:
 
 
 def test_retired_mobile_page_is_skipped() -> None:
-    from lib import browser_session as bs
-
     session = BrowserSession()
     driver = FakeDriver(session, missing={bs.MOBILE_LOGIN_URL})
     session._driver = driver
