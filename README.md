@@ -54,7 +54,7 @@ A web application that automatically checks you in to your Southwest Airlines fl
 - **Display Names**: Assign friendly names to accounts for easy identification (e.g., "Mom", "Dad")
 - **Multiple Accounts**: Add as many Southwest accounts as you like; each is signed in on its own schedule and its flights are checked in, fare-checked and alerted on
 - **Per-Account Seats & Fares**: Each account can have its own seat preferences, "pick a better seat at check-in" switch and fare-check mode (Accounts > Seats & fares); accounts without their own use the shared set in Settings
-- **A-List Support**: Flag accounts as A-List or A-List Preferred status
+- **A-List Support**: Flag accounts as A-List or A-List Preferred. Their flights are checked in 48 hours before departure (A-List members can check in and change seats then); if Southwest won't allow it that early, the app tries again at 24 hours
 - **Better Seat at Check-In** *(experimental, see [Seat Upgrades](#seat-upgrades-experimental))*: right after check-in, moves you to a free seat that beats your current one under your preferences, and keeps looking until 2 hours before departure. A-List accounts can start 48 hours out. Paid seats are never chosen
 - **Smart Deactivation**: Accounts only deactivate after 3 consecutive confirmed credential failures; transient errors are retried automatically
 

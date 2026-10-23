@@ -53,18 +53,18 @@ def _set(conn, key: str, value: str) -> None:
 
 def _next_checkin(conn, now: datetime) -> datetime | None:
     rows = conn.execute(
-        "SELECT departure_time FROM flights WHERE checkin_status IN ('pending', 'scheduled') "
+        "SELECT departure_time, checkin_hours FROM flights WHERE checkin_status IN ('pending', 'scheduled') "
         "AND departure_time > ?",
         (now.strftime("%Y-%m-%dT%H:%M:%S"),),
     ).fetchall()
     times = []
-    for (dep,) in rows:
+    for dep, hours in rows:
         try:
             d = datetime.fromisoformat(dep)
         except ValueError:
             continue
         d = d if d.tzinfo else d.replace(tzinfo=timezone.utc)
-        times.append(d - timedelta(days=1))
+        times.append(d - timedelta(hours=int(hours or 24)))
     future = [t for t in times if t > now - timedelta(hours=1)]
     return min(future) if future else None
 

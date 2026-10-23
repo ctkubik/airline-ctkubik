@@ -34,3 +34,39 @@ def test_headers_from_another_mobile_api_call() -> None:
     session._headers_listener(event(API_BASE_URL + "mobile-air-booking/v1/other", WAF))
     assert session._headers_set
     assert session.headers["X-API-Key"] == "k"
+
+
+class FakeDriver:
+    """Each URL either shows Southwest's missing-page error or hands over headers."""
+
+    def __init__(self, session: BrowserSession, missing: set[str]) -> None:
+        self.session = session
+        self.missing = missing
+        self.opened: list[str] = []
+        self.url = ""
+
+    def get(self, url: str) -> None:
+        self.opened.append(url)
+        self.url = url
+        if url not in self.missing:
+            self.session._headers_listener(event(MOBILE_HEADERS_URL, WAF))
+
+    def execute_script(self, _script: str) -> str:
+        if self.url in self.missing:
+            return "Sorry! We're having trouble accessing this content. Error 404040404"
+        return "Welcome"
+
+
+def test_retired_mobile_page_is_skipped() -> None:
+    from lib import browser_session as bs
+
+    session = BrowserSession()
+    driver = FakeDriver(session, missing={bs.MOBILE_LOGIN_URL})
+    session._driver = driver
+    session._load_mobile_site(timeout=10)
+    assert driver.opened == [bs.MOBILE_LOGIN_URL, bs.BASE_URL + "/"]
+    assert session._headers_set
+    # The page that worked is tried first next time
+    driver.opened.clear()
+    session._load_mobile_site(timeout=10)
+    assert driver.opened == [bs.BASE_URL + "/"]

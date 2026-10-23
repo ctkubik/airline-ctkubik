@@ -40,6 +40,7 @@ interface FareInfo {
 interface FlightWithFare {
   id: string;
   reservation_id: string;
+  checkin_hours?: number | null;
   flight_number: string;
   departure_airport: string;
   destination_airport: string;
@@ -310,7 +311,11 @@ export default function FlightsPage() {
                       )}
                     </div>
                     <div className="w-24 text-right">
-                      <CountdownTimer departureTime={flight.departure_time} status={flight.checkin_status} />
+                      <CountdownTimer
+                      departureTime={flight.departure_time}
+                      status={flight.checkin_status}
+                      checkinHours={flight.checkin_hours}
+                    />
                     </div>
                     <StatusBadge status={flight.checkin_status} />
                     <Button

@@ -257,7 +257,13 @@ def schedule_pending_flights(conn: sqlite3.Connection) -> None:
             logger.error("Invalid departure time for flight %s: %s", flight_id, departure_time_str)
             continue
 
-        checkin_time = departure_time - timedelta(days=1)
+        # A-List members can check in 48 hours out. A stored value wins: it's
+        # 24 after Southwest refused an early attempt for this flight.
+        hours = flight_row.get("checkin_hours") or (48 if flight_row.get("is_alist") else 24)
+        if flight_row.get("checkin_hours") != hours:
+            conn.execute("UPDATE flights SET checkin_hours = ? WHERE id = ?", (hours, flight_id))
+            conn.commit()
+        checkin_time = departure_time - timedelta(hours=hours)
         if checkin_time < get_current_time():
             # Check-in time has passed, check if it's still within window
             if departure_time > get_current_time():
@@ -278,6 +284,7 @@ def schedule_pending_flights(conn: sqlite3.Connection) -> None:
             destination_airport=flight_row["destination_airport"],
             is_same_day=False,
             db_conn_factory=get_db,
+            checkin_hours=hours,
         )
         # Register before scheduling so a failure can't leave a running thread
         # unregistered (which would spawn a duplicate handler on the next poll).
@@ -710,13 +717,11 @@ def _restore_mobile_origin(conn: sqlite3.Connection, flight_id: str) -> None:
                 current = ""
             if "mobile.southwest.com" in current:
                 return
-            driver.get("https://mobile.southwest.com/login?webView=true")
-            time.sleep(2)
-            browser_session._headers_set = False
+            # Back to a mobile.southwest.com page with a fresh API session
             try:
-                browser_session._wait_for_headers()
-            except Exception:
-                pass
+                browser_session._load_mobile_site(timeout=90)
+            except Exception as restore_err:
+                logger.warning("Couldn't restore the mobile site: %s", restore_err)
         add_log(conn, "Browser restored to mobile.southwest.com after seat upgrade", "info", flight_id)
     except Exception as e:
         logger.error("Failed to restore browser to mobile origin: %s", e)
@@ -738,7 +743,7 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
     now_utc = datetime.utcnow()
     for handler_id, handler in active_handlers.items():
         try:
-            checkin_time = handler.departure_time - timedelta(days=1)
+            checkin_time = handler.checkin_time
             seconds_until_checkin = (checkin_time - now_utc.replace(tzinfo=handler.departure_time.tzinfo) if handler.departure_time.tzinfo else checkin_time - now_utc).total_seconds()
             if 0 < seconds_until_checkin < 7200:  # Within 2 hours
                 add_log(conn, f"Seat upgrades PAUSED: check-in for {handler.confirmation_number} in {int(seconds_until_checkin / 60)} minutes. Check-in takes priority.", "info")
@@ -1275,13 +1280,11 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                 audit.finish(status="success" if any(s.get("name") == "click_seat" and s.get("success") for s in audit.steps) else "partial")
 
                 # Step 8: Navigate back to mobile site
-                driver.get("https://mobile.southwest.com/login?webView=true")
-                time.sleep(2)
-                browser_session._headers_set = False
+                # Back to a mobile.southwest.com page with a fresh API session
                 try:
-                    browser_session._wait_for_headers()
-                except Exception:
-                    pass
+                    browser_session._load_mobile_site(timeout=90)
+                except Exception as restore_err:
+                    logger.warning("Couldn't restore the mobile site: %s", restore_err)
 
         except Exception as e:
             logger.error("Seat upgrade error for %s: %s", conf_num, e)
@@ -1324,7 +1327,7 @@ def _checkin_within(hours: float) -> str | None:
             departure = handler.departure_time
             if departure.tzinfo is None:
                 departure = departure.replace(tzinfo=timezone.utc)
-            seconds = (departure - timedelta(days=1) - now_utc).total_seconds()
+            seconds = (departure - timedelta(hours=handler.checkin_hours) - now_utc).total_seconds()
             if 0 < seconds < hours * 3600:
                 return handler.confirmation_number
         except Exception:
@@ -1380,13 +1383,11 @@ def check_southwest_watches(conn: sqlite3.Connection) -> None:
                     best = sw.find_southwest_fare(search, watch)
                 finally:
                     # Back to the mobile site before anyone else gets the browser
-                    driver.get("https://mobile.southwest.com/login?webView=true")
-                    time.sleep(2)
-                    browser_session._headers_set = False
+                    # Back to a mobile.southwest.com page with a fresh API session
                     try:
-                        browser_session._wait_for_headers()
-                    except Exception:
-                        pass
+                        browser_session._load_mobile_site(timeout=90)
+                    except Exception as restore_err:
+                        logger.warning("Couldn't restore the mobile site: %s", restore_err)
             record_watch_result(conn, watch, best, send_notification)
             add_log(
                 conn,

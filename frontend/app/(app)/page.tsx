@@ -126,7 +126,11 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-4">
                     <ReadinessBadge flight={flight} />
                     <StatusBadge status={flight.checkin_status} />
-                    <CountdownTimer departureTime={flight.departure_time} status={flight.checkin_status} />
+                    <CountdownTimer
+                      departureTime={flight.departure_time}
+                      status={flight.checkin_status}
+                      checkinHours={flight.checkin_hours}
+                    />
                   </div>
                 </div>
               ))}

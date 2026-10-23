@@ -132,7 +132,7 @@ def _flights_in_window(conn, now: datetime) -> list[dict]:
         departure = _parse_utc(flight["departure_time"])
         if departure is None:
             continue
-        checkin_at = departure - timedelta(days=1)
+        checkin_at = departure - timedelta(hours=int(flight.get("checkin_hours") or 24))
         if not (now <= checkin_at <= window_end):
             continue
         last = _parse_utc(flight.get("readiness_checked_at"))
@@ -260,7 +260,7 @@ def check_missed_checkins(
         departure = _parse_utc(flight["departure_time"])
         if departure is None or departure <= now:
             continue
-        checkin_at = departure - timedelta(days=1)
+        checkin_at = departure - timedelta(hours=int(flight.get("checkin_hours") or 24))
         # A flight added after check-in opened is checked in right away;
         # count the grace period from when the app learned about it.
         known_since = _parse_utc(flight.get("created_at")) or checkin_at

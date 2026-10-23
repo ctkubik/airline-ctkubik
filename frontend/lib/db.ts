@@ -331,6 +331,7 @@ function migrate(db: Database.Database) {
   addColumnIfMissing("notification_configs", "account_ids", "account_ids TEXT");
   addColumnIfMissing("reservations", "owner_account_id", "owner_account_id TEXT");
   addColumnIfMissing("fare_watches", "provider", "provider TEXT DEFAULT 'amadeus'");
+  addColumnIfMissing("flights", "checkin_hours", "checkin_hours INTEGER");
   addColumnIfMissing("seat_preferences", "pick_at_checkin", "pick_at_checkin INTEGER DEFAULT 0");
   addColumnIfMissing("seat_preferences", "avoid_rows", "avoid_rows TEXT DEFAULT ''");
   addColumnIfMissing("seat_preferences", "min_row_gain", "min_row_gain INTEGER DEFAULT 0");

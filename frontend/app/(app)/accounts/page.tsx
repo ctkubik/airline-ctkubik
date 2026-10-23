@@ -147,7 +147,7 @@ export default function AccountsPage() {
                 <div>
                   <div className="text-sm font-medium">A-List Status</div>
                   <div className="text-xs text-gray-400">
-                    Enable for A-List or A-List Preferred members
+                    A-List or A-List Preferred: the app checks in 48 hours before departure (and at 24 hours if Southwest won&apos;t allow it), then picks a better free seat
                   </div>
                 </div>
                 <button

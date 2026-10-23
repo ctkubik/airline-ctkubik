@@ -36,6 +36,8 @@ export interface Flight {
   checkin_status: "pending" | "scheduled" | "checking_in" | "success" | "failed";
   checkin_result: string | null;
   checkin_attempted_at: string | null;
+  // Hours before departure that check-in opens (48 for A-List); null = 24
+  checkin_hours?: number | null;
   created_at: string;
   // Safety net (worker/safety_net.py)
   readiness_status?: "ready" | "problem" | null;

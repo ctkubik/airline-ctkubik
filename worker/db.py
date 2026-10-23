@@ -333,6 +333,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if fw_cols and "provider" not in fw_cols:
         conn.execute("ALTER TABLE fare_watches ADD COLUMN provider TEXT DEFAULT 'amadeus'")
 
+    # When check-in opens for this flight: 48 hours for A-List, else 24
+    # (worker.py schedule_pending_flights; back to 24 if Southwest refuses early)
+    flight_cols = [row[1] for row in conn.execute("PRAGMA table_info(flights)").fetchall()]
+    if "checkin_hours" not in flight_cols:
+        conn.execute("ALTER TABLE flights ADD COLUMN checkin_hours INTEGER")
+
     # Seat picking at check-in, rows to avoid, and how far forward counts as better
     sp_cols = [row[1] for row in conn.execute("PRAGMA table_info(seat_preferences)").fetchall()]
     for col, ddl in (
@@ -376,8 +382,10 @@ def get_active_reservations(conn: sqlite3.Connection) -> list[dict]:
 def get_pending_flights(conn: sqlite3.Connection) -> list[dict]:
     now = datetime.utcnow().isoformat()
     rows = conn.execute(
-        "SELECT f.*, r.confirmation_number, r.first_name, r.last_name "
+        "SELECT f.*, r.confirmation_number, r.first_name, r.last_name, "
+        "COALESCE(a.is_alist, 0) AS is_alist "
         "FROM flights f JOIN reservations r ON r.id = f.reservation_id "
+        "LEFT JOIN accounts a ON a.id = COALESCE(r.account_id, r.owner_account_id) "
         "WHERE f.checkin_status IN ('pending', 'scheduled') "
         "AND f.departure_time > ? "
         "ORDER BY f.departure_time ASC",
@@ -450,6 +458,14 @@ def upsert_flight(
     )
     conn.commit()
     return flight_id
+
+
+def checkin_hours(flight: dict) -> int:
+    """Hours before departure that check-in opens for this flight."""
+    try:
+        return int(flight.get("checkin_hours") or 24)
+    except (TypeError, ValueError):
+        return 24
 
 
 def update_flight_status(
@@ -651,14 +667,13 @@ def get_flights_for_seat_upgrade(conn: sqlite3.Connection) -> list[dict]:
     * A-List accounts with auto upgrade on: from 48 hours out (A-List
       members can change seats then).
     * "Pick a better seat at check-in" (on the account's own preferences, or
-      the shared ones in Settings): every flight once it's checked in, from
-      24 hours out. The first try runs right after check-in;
+      the shared ones in Settings): every flight once it's checked in (24
+      hours out, or 48 for A-List). The first try runs right after check-in;
       later tries (every SEAT_UPGRADE_COOLDOWN) catch seats that open up.
     Both stop 2 hours before departure.
     """
     now = datetime.utcnow()
     hours_2 = (now + timedelta(hours=2)).isoformat()
-    hours_24 = (now + timedelta(hours=24)).isoformat()
     hours_48 = (now + timedelta(hours=48)).isoformat()
     rows = conn.execute(
         "SELECT f.*, r.confirmation_number, r.first_name, r.last_name, a.is_alist, a.auto_upgrade_seats, "
@@ -673,7 +688,8 @@ def get_flights_for_seat_upgrade(conn: sqlite3.Connection) -> list[dict]:
         "  OR (COALESCE(sa.pick_at_checkin, sd.pick_at_checkin, 0) = 1"
         "      AND f.checkin_status = 'success' AND f.departure_time BETWEEN ? AND ?)"
         ") ORDER BY f.departure_time ASC",
-        (hours_2, hours_48, hours_2, hours_24),
+        # Checked in means seat changes are open (48 hours out for A-List)
+        (hours_2, hours_48, hours_2, hours_48),
     ).fetchall()
     return [dict(r) for r in rows]
 

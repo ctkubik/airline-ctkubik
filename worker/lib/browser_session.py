@@ -22,6 +22,15 @@ JSON = dict[str, Any]
 
 BASE_URL = "https://mobile.southwest.com"
 MOBILE_LOGIN_URL = BASE_URL + "/login?webView=true"
+# Mobile pages that call Southwest's API on load, in the order to try them
+MOBILE_START_URLS = [
+    MOBILE_LOGIN_URL,
+    BASE_URL + "/",
+    BASE_URL + "/check-in",
+    BASE_URL + "/view-reservation",
+]
+MOBILE_PAGE_WAIT = 30  # seconds per page before trying the next one
+MISSING_PAGE_RE = re.compile(r"trouble accessing this content|Error\s*404040404", re.IGNORECASE)
 MOBILE_HEADERS_URL = (
     BASE_URL + "/api/mobile-air-booking/v1/mobile-air-booking/feature/shopping-details"
 )
@@ -107,6 +116,7 @@ class BrowserSession:
         self._login_request_id = None
         self._login_status_code = None
         self._trips_request_id = None
+        self._good_mobile_url: str | None = None
 
     def start(self) -> None:
         """Start the browser and navigate to mobile site to establish WAF session."""
@@ -194,19 +204,55 @@ class BrowserSession:
             except Exception as err:  # noqa: BLE001
                 logger.debug("Couldn't switch windows: %s", err)
 
-    def _load_mobile_site(self, timeout: int = WAIT_TIMEOUT_SECS) -> None:
-        """Open the mobile site and wait for its API headers (the WAF session)."""
-        logger.info("Loading mobile Southwest site to establish session")
-        self._headers_set = False
+    def _open(self, url: str) -> None:
         try:
-            self._driver.get(MOBILE_LOGIN_URL)
+            self._driver.get(url)
         except Exception as err:  # noqa: BLE001
             if "no such window" not in str(err).lower() and "web view not found" not in str(err).lower():
                 raise
             logger.warning("Browser window went away; switching to the open one and retrying")
             self._use_live_window()
-            self._driver.get(MOBILE_LOGIN_URL)
-        self._wait_for_attribute("_headers_set", timeout=timeout)
+            self._driver.get(url)
+
+    def _page_says_missing(self) -> bool:
+        """Southwest's 'Sorry! We're having trouble accessing this content' page."""
+        try:
+            text = self._driver.execute_script("return document.body ? document.body.innerText : ''") or ""
+        except Exception:  # noqa: BLE001
+            return False
+        return bool(MISSING_PAGE_RE.search(text))
+
+    def _load_mobile_site(self, timeout: int = WAIT_TIMEOUT_SECS) -> None:
+        """Open a mobile.southwest.com page and wait for its API headers (the WAF session).
+
+        Any page on the mobile site works as long as it calls Southwest's API.
+        Pages Southwest retires answer "Sorry! We're having trouble accessing
+        this content (Error 404040404)", so the next page in the list is tried.
+        The page that worked last is tried first next time.
+        """
+        self._headers_set = False
+        urls = [u for u in [self._good_mobile_url, *MOBILE_START_URLS] if u]
+        urls = list(dict.fromkeys(urls))
+        deadline = time.time() + timeout
+        for i, url in enumerate(urls):
+            if self._headers_set:
+                break
+            logger.info("Loading mobile Southwest site to establish session: %s", url)
+            self._open(url)
+            # Last page gets whatever time is left; others a share of it
+            remaining = deadline - time.time()
+            budget = remaining if i == len(urls) - 1 else min(remaining, MOBILE_PAGE_WAIT)
+            end = time.time() + max(budget, 0)
+            while not self._headers_set and time.time() < end:
+                if self._page_says_missing():
+                    logger.warning("Southwest says %s isn't available; trying the next page", url)
+                    break
+                time.sleep(1)
+            if self._headers_set:
+                self._good_mobile_url = url
+                return
+        if not self._headers_set:
+            raise DriverTimeoutError("Timeout waiting for Southwest's mobile site to hand over a session")
 
     def _quit_driver(self) -> None:
         if self._driver:

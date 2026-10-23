@@ -62,6 +62,7 @@ interface FeedFlight {
   checkin_status: string;
   assigned_seat: string | null;
   readiness_status: string | null;
+  checkin_hours: number | null;
   confirmation_number: string;
   first_name: string;
   last_name: string;
@@ -72,7 +73,7 @@ export function buildCalendar(db: Database.Database): string {
   const flights = db
     .prepare(
       `SELECT f.id, f.flight_number, f.departure_airport, f.destination_airport, f.departure_time,
-              f.checkin_status, f.assigned_seat, f.readiness_status,
+              f.checkin_status, f.assigned_seat, f.readiness_status, f.checkin_hours,
               r.confirmation_number, r.first_name, r.last_name
        FROM flights f JOIN reservations r ON r.id = f.reservation_id
        WHERE r.is_active = 1 AND f.departure_time > ?
@@ -116,7 +117,7 @@ export function buildCalendar(db: Database.Database): string {
       "END:VEVENT"
     );
 
-    const checkin = new Date(depart.getTime() - 86400000);
+    const checkin = new Date(depart.getTime() - (f.checkin_hours || 24) * 3600000);
     lines.push(
       "BEGIN:VEVENT",
       `UID:checkin-${f.id}@airline-checkin`,

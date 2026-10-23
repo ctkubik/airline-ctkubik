@@ -44,6 +44,7 @@ class CheckInHandler:
         destination_airport: str,
         is_same_day: bool,
         db_conn_factory,
+        checkin_hours: int = 24,
     ) -> None:
         self.browser_session = browser_session
         self.headers = browser_session.headers if browser_session else {}
@@ -56,6 +57,8 @@ class CheckInHandler:
         self.destination_airport = destination_airport
         self.is_same_day = is_same_day
         self.db_conn_factory = db_conn_factory
+        # Hours before departure to check in: 24, or 48 for A-List members
+        self.checkin_hours = checkin_hours
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
@@ -138,12 +141,29 @@ class CheckInHandler:
                 time.sleep(2)
         raise last_err
 
+    @property
+    def checkin_time(self) -> datetime:
+        return self.departure_time - timedelta(hours=self.checkin_hours)
+
     def _set_check_in(self) -> None:
-        checkin_time = self.departure_time - timedelta(days=1)
+        # A-List: try at 48 hours. If Southwest won't check in that early,
+        # try again at the usual 24 hours rather than failing.
+        plan = [self.checkin_hours] + ([24] if self.checkin_hours > 24 else [])
         try:
-            self._wait_for_check_in(checkin_time)
-            if not self._stop_event.is_set():
-                self._check_in()
+            for i, hours in enumerate(plan):
+                final = i == len(plan) - 1
+                self._wait_for_check_in(self.departure_time - timedelta(hours=hours))
+                if self._stop_event.is_set():
+                    return
+                if self._check_in(final=final):
+                    return
+                logger.info(
+                    "Southwest didn't allow check-in %d hours out for %s; trying again at 24 hours",
+                    hours, self.confirmation_number,
+                )
+                self.checkin_hours = 24
+                self._save_checkin_hours(24)
+                self._update_status("scheduled")
         except Exception as e:
             logger.exception("Error during check-in: %s", e)
             try:
@@ -197,7 +217,20 @@ class CheckInHandler:
             self._stop_event.wait(timeout=sleep_time)
             total_sleep_time -= sleep_time
 
-    def _check_in(self) -> None:
+    def _save_checkin_hours(self, hours: int) -> None:
+        try:
+            conn = self.db_conn_factory()
+            try:
+                conn.execute("UPDATE flights SET checkin_hours = ? WHERE id = ?", (hours, self.flight_db_id))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Couldn't save check-in time for %s: %s", self.flight_db_id, e)
+
+    def _check_in(self, final: bool = True) -> bool:
+        """Check in. Returns False only when an early (A-List) attempt was
+        refused and a later attempt should follow; True once it's settled."""
         self._update_status("checking_in")
         logger.info(
             "Checking in to flight %s -> %s for %s %s",
@@ -221,9 +254,15 @@ class CheckInHandler:
                                  "Successful check-in", "Airport check-in required")
             self._send_notification(False, "Airport check-in required")
             capture.finish_capture(success=False)
-            return
+            return True
         except RequestError as err:
             logger.debug("Failed to check in. Error: %s", err)
+            if not final:
+                self._log_diagnostic("checkin_early_refused",
+                                     f"early check-in for {self.confirmation_number}",
+                                     "A-List check-in 48 hours out", str(err))
+                capture.finish_capture(success=False)
+                return False
             self._update_status("failed", str(err))
             self._log_diagnostic("checkin_failure",
                                  f"check-in for {self.confirmation_number}",
@@ -231,7 +270,15 @@ class CheckInHandler:
                                  str(err))
             self._send_notification(False, str(err))
             capture.finish_capture(success=False)
-            return
+            return True
+        except Exception as err:  # noqa: BLE001
+            # An early attempt can also come back in an unexpected shape
+            # (no check-in link yet); that's a refusal, not a failure.
+            if final:
+                raise
+            logger.debug("Early check-in attempt didn't go through: %s", err)
+            capture.finish_capture(success=False)
+            return False
 
         confirmation_page = reservation.get("checkInConfirmationPage", {})
         result_json = json.dumps(confirmation_page)
@@ -244,6 +291,7 @@ class CheckInHandler:
 
         # Discovery: log response structure for seat assignment analysis
         self._discover_seat_info(reservation)
+        return True
 
     def _discover_seat_info(self, reservation: JSON) -> None:
         """Log check-in response structure to help discover seat selection endpoints."""
