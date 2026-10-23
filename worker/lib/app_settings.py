@@ -27,6 +27,7 @@ MANAGED = SECRETS | {
     "LLM_BASE_URL",
     "LLM_MODEL",
     "LLM_TIMEOUT",
+    "SOUTHWEST_PHONE_APP",
 }
 
 # .env values as the process started, to restore when a saved value is removed

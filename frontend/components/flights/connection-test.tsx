@@ -18,8 +18,8 @@ interface Result {
   checked_at?: string;
 }
 
-// "Test check-in connection": asks the worker to prove both check-in paths
-// (the phone-app service and the southwest.com backup) work for this flight
+// "Test check-in connection": asks the worker to prove check-in will work for
+// this flight (southwest.com, plus the phone-app service when it's turned on)
 // right now, without checking anyone in. Results arrive within a minute or two.
 export function ConnectionTest({ flightId }: { flightId: string }) {
   const [result, setResult] = useState<Result | null>(null);

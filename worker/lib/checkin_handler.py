@@ -10,6 +10,7 @@ import threading
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from .config import phone_app_enabled
 from .log import get_logger
 from .utils import (
     AirportCheckInError,
@@ -26,6 +27,10 @@ JSON = dict[str, Any]
 
 CHECKIN_URL = "mobile-air-operations/v1/mobile-air-operations/page/check-in/"
 MAX_CHECK_IN_ATTEMPTS = 10
+# Website check-in: tries at check-in time, a short wait apart, when the page
+# says it's too early or the result is unclear (clocks can be a little off)
+WEBSITE_ATTEMPTS = 4
+WEBSITE_RETRY_SECONDS = 20
 
 logger = get_logger(__name__)
 
@@ -60,6 +65,7 @@ class CheckInHandler:
         self.db_conn_factory = db_conn_factory
         # Hours before departure to check in: 24, or 48 for A-List members
         self.checkin_hours = checkin_hours
+        self._last_web: dict | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
@@ -190,9 +196,9 @@ class CheckInHandler:
             if self._stop_event.is_set():
                 return
 
-            # CRITICAL: Ensure browser is alive AND on mobile.southwest.com before check-in
-            # Seat upgrades may have navigated the browser to www.southwest.com,
-            # which causes fetch() to fail with status 0 (same-origin policy)
+            # A fresh browser before check-in. With the phone-app service it
+            # must be on mobile.southwest.com: seat upgrades may have left it on
+            # www.southwest.com, where fetch() fails (same-origin policy).
             if self.browser_session:
                 try:
                     logger.info("Preparing browser for check-in: restarting fresh session")
@@ -219,12 +225,14 @@ class CheckInHandler:
             total_sleep_time -= sleep_time
 
     def _web_fallback(self, capture) -> bool | None:  # noqa: ANN001
-        """The phone-app path failed: try checking in on southwest.com instead.
+        """Check in on southwest.com (the main path, or the backup when the
+        phone-app service is on and failed).
 
         Returns True when the website checked the passenger in (status and
         alert already recorded), False when the website also can't (too
         early, airport check-in, not found), and None when it couldn't run.
         """
+        self._last_web = None
         session = self.browser_session
         driver = getattr(session, "_driver", None) if session else None
         if session is None or driver is None:
@@ -232,7 +240,7 @@ class CheckInHandler:
         from .config import CAPTURES_DIR
         from .web_checkin import web_check_in
 
-        logger.info("Phone-app check-in failed for %s; trying southwest.com", self.confirmation_number)
+        logger.info("Checking in %s on southwest.com", self.confirmation_number)
         try:
             with session._lock:
                 result = web_check_in(
@@ -242,14 +250,16 @@ class CheckInHandler:
                     self.last_name,
                     capture_dir=os.path.join(CAPTURES_DIR, self.flight_db_id),
                 )
-                # Put the browser back on the mobile site for the next check-in
+                # With the phone-app service, back to the mobile site for the next check-in
                 try:
-                    session._load_mobile_site(timeout=60)
+                    session.restore(timeout=60)
                 except Exception as err:  # noqa: BLE001
                     logger.warning("Couldn't restore the mobile site after website check-in: %s", err)
         except Exception as err:  # noqa: BLE001
             logger.warning("Website check-in failed to run: %s", err)
+            self._last_web = {"status": "error", "message": f"Website check-in couldn't run: {err}"}
             return None
+        self._last_web = result
         self._log_diagnostic(
             "checkin_website_fallback",
             "southwest.com check-in page",
@@ -270,6 +280,45 @@ class CheckInHandler:
             self._send_notification(False, "Airport check-in required")
             return True
         return False
+
+    def _website_check_in(self, capture, final: bool) -> bool:  # noqa: ANN001
+        """Check in on southwest.com only (the phone-app service is off).
+
+        Same return rule as _check_in: False only when an early (A-List)
+        attempt was refused and the 24-hour attempt should follow.
+        """
+        attempts = WEBSITE_ATTEMPTS if final else 1
+        for attempt in range(1, attempts + 1):
+            settled = self._web_fallback(capture)
+            if settled:
+                return True  # checked in, or airport check-in required (both recorded)
+            status = (self._last_web or {}).get("status", "")
+            if attempt < attempts and status in ("too_early", "unknown", "error", "blocked", ""):
+                logger.info(
+                    "Website check-in attempt %d for %s: %s; trying again in %d seconds",
+                    attempt, self.confirmation_number, status or "didn't run", WEBSITE_RETRY_SECONDS,
+                )
+                self._stop_event.wait(WEBSITE_RETRY_SECONDS)
+                if self._stop_event.is_set():
+                    break
+                continue
+            break
+        message = (self._last_web or {}).get("message") or "The browser isn't running"
+        if not final:
+            self._log_diagnostic("checkin_early_refused", f"early check-in for {self.confirmation_number}",
+                                 "A-List check-in 48 hours out", message)
+            try:
+                capture.finish_capture(success=False)
+            except Exception:  # noqa: BLE001
+                pass
+            return False
+        self._update_status("failed", message)
+        self._send_notification(False, message)
+        try:
+            capture.finish_capture(success=False)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
 
     def _save_checkin_hours(self, hours: int) -> None:
         try:
@@ -298,6 +347,9 @@ class CheckInHandler:
         from .capture import CheckInCapture
         capture = CheckInCapture(self.flight_db_id, self.browser_session, self.db_conn_factory)
         capture.start_capture()
+
+        if not phone_app_enabled():
+            return self._website_check_in(capture, final)
 
         try:
             reservation = self._attempt_check_in(capture)

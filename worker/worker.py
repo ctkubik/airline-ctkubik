@@ -39,7 +39,7 @@ from db import (
     get_stale_capture_dirs,
     recover_stuck_checkins,
 )
-from lib.config import CAPTURES_DIR
+from lib.config import CAPTURES_DIR, phone_app_enabled
 from lib.app_settings import apply_to_environ as apply_app_settings
 from lib.credentials import CredentialKeyError, encrypt_stored_passwords
 from lib.log import get_logger
@@ -92,7 +92,12 @@ def process_reservation(
     conn: sqlite3.Connection,
     reservation: dict,
 ) -> list[dict]:
-    """Retrieve flights for a reservation from Southwest API and sync to database."""
+    """Retrieve flights for a reservation from Southwest and sync to database.
+
+    Uses southwest.com unless the phone-app service is turned on.
+    """
+    if not phone_app_enabled():
+        return _reservation_from_website(conn, reservation)
     confirmation_number = reservation["confirmation_number"]
     first_name = reservation["first_name"]
     last_name = reservation["last_name"]
@@ -439,7 +444,7 @@ def _web_lookup(conn: sqlite3.Connection, res: dict) -> tuple[int, str]:
             )
         finally:
             try:
-                browser_session._load_mobile_site(timeout=90)
+                browser_session.restore(timeout=90)
             except Exception as e:
                 logger.warning("Couldn't restore the mobile site after the website lookup: %s", e)
     saved = 0
@@ -448,9 +453,43 @@ def _web_lookup(conn: sqlite3.Connection, res: dict) -> tuple[int, str]:
         if not utc:
             add_log(conn, f"Skipped flight {f['flight_number']}: unknown time zone for {f['departure_airport']}", "warning")
             continue
-        upsert_flight(conn, res["id"], f["flight_number"], f["departure_airport"], f["destination_airport"], utc, False)
+        # A flight found earlier (by the phone-app service) may spell its
+        # number differently; same departure means same flight
+        same = conn.execute(
+            "SELECT flight_number FROM flights WHERE reservation_id = ? AND departure_time = ?",
+            (res["id"], utc),
+        ).fetchone()
+        number = same["flight_number"] if same else f["flight_number"]
+        upsert_flight(conn, res["id"], number, f["departure_airport"], f["destination_airport"], utc, False)
         saved += 1
     return saved, result["message"]
+
+
+def _reservation_from_website(conn: sqlite3.Connection, reservation: dict) -> list[dict]:
+    """process_reservation through southwest.com. Returns the flights saved."""
+    try:
+        saved, message = _web_lookup(conn, reservation)
+    except Exception as e:
+        saved, message = 0, f"website lookup failed: {str(e).splitlines()[0][:200] if str(e) else type(e).__name__}"
+    process_reservation.last_error = "" if saved else message
+    level = "info" if saved else "error"
+    add_log(conn, f"Reservation {reservation['confirmation_number']}: {message}", level)
+    if not saved:
+        return []
+    rows = conn.execute(
+        "SELECT id, flight_number, departure_time, departure_airport, destination_airport "
+        "FROM flights WHERE reservation_id = ? AND departure_time > ?",
+        (reservation["id"], datetime.now(timezone.utc).isoformat()),
+    ).fetchall()
+    return [
+        {
+            **dict(r),
+            "confirmation_number": reservation["confirmation_number"],
+            "first_name": reservation["first_name"],
+            "last_name": reservation["last_name"],
+        }
+        for r in rows
+    ]
 
 
 def process_manual_reservations(conn: sqlite3.Connection) -> None:
@@ -474,23 +513,29 @@ def process_manual_reservations(conn: sqlite3.Connection) -> None:
         failures = int(res.get("lookup_failures") or 0)
         flights = process_reservation(conn, res)
         if flights:
-            _set_lookup(conn, res["id"], "ok", f"Found {len(flights)} flight(s) with Southwest", 0, 24 * 60)
+            where = "with Southwest" if phone_app_enabled() else "on southwest.com"
+            _set_lookup(conn, res["id"], "ok", f"Found {len(flights)} flight(s) {where}", 0, 24 * 60)
             continue
-        mobile_error = (getattr(process_reservation, "last_error", "") or "Southwest returned no flights")
-        try:
-            saved, message = _web_lookup(conn, res)
-        except Exception as e:
-            saved, message = 0, f"website lookup failed: {e}"
-        if saved:
-            _set_lookup(conn, res["id"], "ok", f"Found {saved} flight(s) on southwest.com", 0, 24 * 60)
-            add_log(conn, f"Reservation {res['confirmation_number']}: {message}", "info")
-            continue
+        first_error = (getattr(process_reservation, "last_error", "") or "Southwest returned no flights")
+        if phone_app_enabled():
+            # The phone-app service failed; southwest.com is the backup
+            try:
+                saved, message = _web_lookup(conn, res)
+            except Exception as e:
+                saved, message = 0, f"website lookup failed: {e}"
+            if saved:
+                _set_lookup(conn, res["id"], "ok", f"Found {saved} flight(s) on southwest.com", 0, 24 * 60)
+                add_log(conn, f"Reservation {res['confirmation_number']}: {message}", "info")
+                continue
+            reason = f"phone-app service: {first_error[:150]}; website: {message}"
+        else:
+            reason = first_error
         failures += 1
         retry = LOOKUP_RETRY_MINUTES[min(failures, len(LOOKUP_RETRY_MINUTES)) - 1]
         has_flights = conn.execute("SELECT 1 FROM flights WHERE reservation_id = ? LIMIT 1", (res["id"],)).fetchone()
         _set_lookup(
             conn, res["id"], "ok" if has_flights else "error",
-            f"Couldn't look up the flights (phone-app service: {mobile_error[:150]}; website: {message}). "
+            f"Couldn't look up the flights ({reason}). "
             f"Trying again in {retry} minutes" + ("" if has_flights else ", or add the flights by hand."),
             failures, retry,
         )
@@ -508,6 +553,15 @@ def check_fares(conn: sqlite3.Connection) -> None:
         return
 
     if not browser_session:
+        return
+
+    if not phone_app_enabled():
+        # Fare-drop checks on booked flights read Southwest's change-flight
+        # prices, which only the phone-app service offers
+        if last_fare_check == 0:
+            add_log(conn, "Fare-drop checks on booked flights are off: they need the phone-app service "
+                    "(API Connections page). Southwest fare watches still work.", "info")
+        last_fare_check = time.time()
         return
 
     flights = get_flights_for_fare_check(conn)
@@ -804,7 +858,7 @@ def _restore_mobile_origin(conn: sqlite3.Connection, flight_id: str) -> None:
                 return
             # Back to a mobile.southwest.com page with a fresh API session
             try:
-                browser_session._load_mobile_site(timeout=90)
+                browser_session.restore(timeout=90)
             except Exception as restore_err:
                 logger.warning("Couldn't restore the mobile site: %s", restore_err)
         add_log(conn, "Browser restored to mobile.southwest.com after seat upgrade", "info", flight_id)
@@ -1367,7 +1421,7 @@ def attempt_seat_upgrades(conn: sqlite3.Connection, force_flight_id: str | None 
                 # Step 8: Navigate back to mobile site
                 # Back to a mobile.southwest.com page with a fresh API session
                 try:
-                    browser_session._load_mobile_site(timeout=90)
+                    browser_session.restore(timeout=90)
                 except Exception as restore_err:
                     logger.warning("Couldn't restore the mobile site: %s", restore_err)
 
@@ -1470,7 +1524,7 @@ def check_southwest_watches(conn: sqlite3.Connection) -> None:
                     # Back to the mobile site before anyone else gets the browser
                     # Back to a mobile.southwest.com page with a fresh API session
                     try:
-                        browser_session._load_mobile_site(timeout=90)
+                        browser_session.restore(timeout=90)
                     except Exception as restore_err:
                         logger.warning("Couldn't restore the mobile site: %s", restore_err)
             record_watch_result(conn, watch, best, send_notification)
@@ -1575,17 +1629,28 @@ def process_connection_tests(conn: sqlite3.Connection) -> None:
         return
     save(False)
 
-    # 1. Phone-app path
+    # 1. Phone-app path (only when it's turned on)
+    if not phone_app_enabled():
+        try:
+            browser_session.ensure_alive()
+            steps.append({"name": "Browser", "ok": True, "detail": "Chrome is running on southwest.com"})
+        except Exception as e:
+            steps.append({"name": "Browser", "ok": False, "detail": f"Couldn't start: {str(e).splitlines()[0][:200]}"})
+        save(False)
     try:
+        if not phone_app_enabled():
+            raise _SkipPhoneApp
         browser_session.ensure_alive()
         ok = bool(browser_session.headers)
         steps.append({"name": "Southwest session", "ok": ok,
                       "detail": f"Connected ({len(browser_session.headers)} security headers)" if ok
                       else "The browser is up but Southwest didn't hand over a session"})
+    except _SkipPhoneApp:
+        pass
     except Exception as e:
         steps.append({"name": "Southwest session", "ok": False, "detail": f"Couldn't start: {str(e).splitlines()[0][:200]}"})
     save(False)
-    if steps[-1]["ok"]:
+    if phone_app_enabled() and steps[-1]["ok"]:
         problems = safety_net.check_flight_readiness(flight, browser_session, handler=None)
         problems = [p for p in problems if "isn't queued" not in p]
         steps.append({"name": "Check-in service (phone-app path)", "ok": not problems,
@@ -1593,7 +1658,8 @@ def process_connection_tests(conn: sqlite3.Connection) -> None:
                       if not problems else "; ".join(problems)})
         save(False)
 
-    # 2. Website backup
+    # 2. The website (the check-in path, or the backup with the phone-app service)
+    web_step = "Website backup (southwest.com)" if phone_app_enabled() else "Website check-in (southwest.com)"
     departure = datetime.fromisoformat(flight["departure_time"].replace("Z", "+00:00"))
     if departure.tzinfo is None:
         departure = departure.replace(tzinfo=timezone.utc)
@@ -1620,15 +1686,19 @@ def process_connection_tests(conn: sqlite3.Connection) -> None:
                 else:
                     result = {"ok": True, "message": "southwest.com found the reservation (check-in isn't open yet, so nothing was submitted)"}
             try:
-                browser_session._load_mobile_site(timeout=90)
+                browser_session.restore(timeout=90)
             except Exception as e:
                 logger.warning("Couldn't restore the mobile site after the connection test: %s", e)
-        steps.append({"name": "Website backup (southwest.com)", "ok": bool(result["ok"]), "detail": result["message"]})
+        steps.append({"name": web_step, "ok": bool(result["ok"]), "detail": result["message"]})
     except Exception as e:
-        steps.append({"name": "Website backup (southwest.com)", "ok": False, "detail": f"Couldn't run: {str(e).splitlines()[0][:200]}"})
+        steps.append({"name": web_step, "ok": False, "detail": f"Couldn't run: {str(e).splitlines()[0][:200]}"})
     save(True)
     add_log(conn, f"Connection test for {flight['confirmation_number']}: " + "; ".join(
         f"{s['name']}: {'OK' if s['ok'] else 'problem'}" for s in steps), "info", flight_id)
+
+
+class _SkipPhoneApp(Exception):
+    """The phone-app service is off: the connection test skips that step."""
 
 
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
@@ -1825,7 +1895,7 @@ def main_loop() -> None:
     browser_session = BrowserSession()
     try:
         browser_session.start()
-        add_log(conn, f"Browser session started with {len(browser_session.headers)} headers", "info")
+        add_log(conn, f"Browser session started ({browser_session.mode_description()})", "info")
     except Exception as e:
         logger.error("Failed to start browser session: %s", e)
         add_log(conn, f"Failed to start browser session: {e}", "error")

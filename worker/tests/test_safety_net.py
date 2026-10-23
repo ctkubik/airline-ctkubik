@@ -96,6 +96,7 @@ def test_flights_outside_window_are_skipped(db_conn) -> None:  # noqa: ANN001
     assert browser.calls == 0
 
 
+@pytest.mark.usefixtures("phone_app")
 def test_problem_alerts_after_two_failures_then_clears(db_conn) -> None:  # noqa: ANN001
     fid = add_flight(db_conn, checkin_in=timedelta(hours=2))
     notify = Recorder()
@@ -143,6 +144,7 @@ def test_problem_close_to_checkin_alerts_immediately(db_conn) -> None:  # noqa: 
         (Browser(response={"viewReservationViewPage": {"bounds": []}}), "no flights on it"),
     ],
 )
+@pytest.mark.usefixtures("phone_app")
 def test_problem_descriptions(browser: Any, expected: str) -> None:
     flight = {"first_name": "A", "last_name": "B", "confirmation_number": "ABC123"}
     problems = safety_net.check_flight_readiness(flight, browser, Handler())

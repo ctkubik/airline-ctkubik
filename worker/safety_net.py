@@ -24,6 +24,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+from lib.config import phone_app_enabled
 from lib.log import get_logger
 
 logger = get_logger(__name__)
@@ -150,6 +151,12 @@ def check_flight_readiness(flight: dict, browser_session, handler) -> list[str]:
         problems.append("the check-in isn't queued yet (the app will try to queue it again)")
 
     driver = getattr(browser_session, "_driver", None) if browser_session else None
+    if not phone_app_enabled():
+        # Website check-in: it needs a working browser. The reservation itself
+        # is re-read from southwest.com once a day by the lookups.
+        if browser_session is None or driver is None:
+            problems.append("the Chrome window that checks in on southwest.com isn't running")
+        return problems
     if browser_session is None or driver is None or not getattr(browser_session, "headers", None):
         problems.append("the Chrome session that talks to Southwest isn't running")
         return problems
@@ -193,6 +200,8 @@ def run_readiness_checks(
             "; ".join(problems)
             if problems
             else "Check-in is queued and Southwest has the reservation."
+            if phone_app_enabled()
+            else "Check-in is queued and the browser is ready to check in on southwest.com."
         )
         conn.execute(
             "UPDATE flights SET readiness_status = ?, readiness_detail = ?, "

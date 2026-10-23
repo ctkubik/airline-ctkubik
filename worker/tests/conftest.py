@@ -18,3 +18,15 @@ def db_conn(tmp_path, monkeypatch):  # noqa: ANN001, ANN201
     conn = db.get_connection()
     yield conn
     conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _website_mode(monkeypatch):  # noqa: ANN001, ANN202
+    """Tests run with the default (southwest.com website) unless they ask
+    for the phone-app service with the phone_app fixture."""
+    monkeypatch.delenv("SOUTHWEST_PHONE_APP", raising=False)
+
+
+@pytest.fixture
+def phone_app(monkeypatch):  # noqa: ANN001, ANN201
+    monkeypatch.setenv("SOUTHWEST_PHONE_APP", "true")

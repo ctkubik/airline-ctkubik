@@ -393,6 +393,7 @@ python3 southwest.py --help
 | `CHECKIN_READINESS_HOURS` | Hours before each check-in to start confirming it will work | `3` |
 | `HEALTHCHECK_PING_URL` | Optional [healthchecks.io](https://healthchecks.io) ping URL; you're alerted if pings stop (machine down) | (unset) |
 | `SOUTHWEST_WATCH_INTERVAL_HOURS` | How often Southwest fare watches are checked | `6` |
+| `SOUTHWEST_PHONE_APP` | Also use Southwest's phone-app service: fare-drop checks on booked flights and a faster API check-in (otherwise everything runs on southwest.com) | `false` |
 | `LOYALTY_SYNC_INTERVAL_HOURS` | How often airline accounts with a saved login are synced | `72` |
 | *(note)* | The settings below, plus `LLM_*`, can also be set on the **API Connections** page; a value saved there wins over `.env` | |
 | `AERODATABOX_API_KEY` | RapidAPI key for AeroDataBox; turns on flight status alerts | (unset) |

@@ -23,5 +23,17 @@ if BROWSER_MODE not in ("xvfb", "headed", "headless"):
     BROWSER_MODE = _DEFAULT_BROWSER_MODE
 
 
+
+def phone_app_enabled() -> bool:
+    """Whether to use Southwest's phone-app service (mobile.southwest.com).
+
+    Off by default: the browser stays on www.southwest.com and check-ins,
+    reservation lookups and seat picks all go through the website. Turn it on
+    (SOUTHWEST_PHONE_APP=true, or the API Connections page) for fare-drop
+    checks on booked flights and the faster API check-in.
+    """
+    return os.environ.get("SOUTHWEST_PHONE_APP", "").strip().lower() in ("1", "true", "on", "yes")
+
+
 class ConfigError(Exception):
     pass

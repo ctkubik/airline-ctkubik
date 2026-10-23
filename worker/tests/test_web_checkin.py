@@ -101,6 +101,9 @@ class FakeSession:
         self.headers = {}
         self.restored = False
 
+    def restore(self, timeout: int = 0) -> None:
+        self._load_mobile_site(timeout)
+
     def _load_mobile_site(self, timeout: int = 0) -> None:
         self.restored = True
 
@@ -110,6 +113,7 @@ class Capture:
         pass
 
 
+@pytest.mark.usefixtures("phone_app")
 def test_handler_falls_back_to_website(db_conn, monkeypatch) -> None:  # noqa: ANN001
     db_conn.execute(
         "INSERT INTO reservations (id, confirmation_number, first_name, last_name) VALUES ('r', 'ABC123', 'Pat', 'K')"
@@ -168,6 +172,7 @@ class ReadySession(FakeSession):
         pass
 
 
+@pytest.mark.usefixtures("phone_app")
 def test_connection_test_reports_both_paths(db_conn, monkeypatch) -> None:  # noqa: ANN001
     import importlib.util
     import json

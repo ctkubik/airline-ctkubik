@@ -14,13 +14,14 @@ from sbvirtualdisplay import Display
 from seleniumbase import Driver
 from seleniumbase.fixtures import page_actions as seleniumbase_actions
 
-from .config import BROWSER_MODE, CAPTURES_DIR, IS_DOCKER
+from .config import BROWSER_MODE, CAPTURES_DIR, IS_DOCKER, phone_app_enabled
 from .log import get_logger
 from .utils import DriverTimeoutError, LoginError, RequestError, random_sleep_duration
 
 JSON = dict[str, Any]
 
 BASE_URL = "https://mobile.southwest.com"
+WEBSITE_URL = "https://www.southwest.com/"
 MOBILE_LOGIN_URL = BASE_URL + "/login?webView=true"
 # Mobile pages that call Southwest's API on load, in the order to try them
 MOBILE_START_URLS = [
@@ -140,7 +141,7 @@ class BrowserSession:
         for attempt, incognito in enumerate((True, False), start=1):
             try:
                 self._launch(incognito)
-                self._load_mobile_site()
+                self._load_start_page()
                 last_err = None
                 break
             except Exception as err:  # noqa: BLE001
@@ -151,7 +152,46 @@ class BrowserSession:
             raise last_err
 
         self._started_at = time.time()
-        logger.info("Browser session established with %d headers", len(self.headers))
+        logger.info("Browser session established (%s)", self.mode_description())
+
+    def mode_description(self) -> str:
+        if phone_app_enabled():
+            return f"phone-app service, {len(self.headers)} security headers"
+        return "southwest.com website"
+
+    def _load_start_page(self) -> None:
+        """Open the site the app works from: southwest.com, or the mobile site
+        when the phone-app service is on."""
+        if phone_app_enabled():
+            self._load_mobile_site()
+        else:
+            self._load_website()
+
+    def _load_website(self, timeout: int = 60) -> None:
+        """Open southwest.com and wait for it to finish loading."""
+        self.headers = {}
+        self._headers_set = False
+        logger.info("Opening southwest.com")
+        self._open(WEBSITE_URL)
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if self._driver.execute_script("return document.readyState") == "complete":
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(1)
+        if self._page_says_missing():
+            logger.warning("southwest.com showed its 'trouble accessing this content' page")
+
+    def restore(self, timeout: int = 90) -> None:
+        """After a website task: put the browser back where the next task expects it.
+
+        Only the phone-app service needs this (its requests run from the mobile
+        site); with the website it's already in the right place.
+        """
+        if phone_app_enabled():
+            self._load_mobile_site(timeout=timeout)
 
     def _launch(self, incognito: bool) -> None:
         # Docker ships a matched chromedriver; elsewhere (macOS) SeleniumBase
@@ -335,6 +375,8 @@ class BrowserSession:
         random_sleep: bool = True,
     ) -> dict:
         """Make an API request through the browser, with retry logic."""
+        if not phone_app_enabled():
+            raise RequestError("The phone-app service is turned off (the website is used instead)")
         # Build full URL
         site = site.replace("//", "/").lstrip("/")
         url = API_BASE_URL + site
@@ -461,17 +503,19 @@ class BrowserSession:
             trips_response = self._get_response_body(self._trips_request_id)
             reservations = trips_response.get("data", [])
 
-            # Back to the mobile site to re-establish the API session. Signed
-            # in, the mobile site may not make the request the headers come
-            # from; if nothing arrives soon, a fresh browser always works.
-            logger.info("Navigating back to mobile site after login")
-            try:
-                self._load_mobile_site(timeout=POST_LOGIN_HEADER_WAIT)
-                self._started_at = time.time()
-            except Exception as err:  # noqa: BLE001
-                logger.info("Mobile site didn't hand over a session after login (%s); restarting the browser", err)
-                self._start_internal()
-            logger.info("Session re-established after login with %d headers", len(self.headers))
+            if phone_app_enabled():
+                # Back to the mobile site to re-establish the API session.
+                # Signed in, the mobile site may not make the request the
+                # headers come from; if nothing arrives soon, a fresh browser
+                # always works.
+                logger.info("Navigating back to mobile site after login")
+                try:
+                    self._load_mobile_site(timeout=POST_LOGIN_HEADER_WAIT)
+                    self._started_at = time.time()
+                except Exception as err:  # noqa: BLE001
+                    logger.info("Mobile site didn't hand over a session after login (%s); restarting the browser", err)
+                    self._start_internal()
+                logger.info("Session re-established after login with %d headers", len(self.headers))
 
             return reservations, first_name, last_name
 

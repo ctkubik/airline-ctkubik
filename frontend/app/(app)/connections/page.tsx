@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, ExternalLink, PlugZap, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, ExternalLink, Globe, PlugZap, Sparkles, XCircle } from "lucide-react";
 
 type Source = "app" | "env" | "default";
 
@@ -208,7 +208,7 @@ export default function ConnectionsPage() {
           <PlugZap className="h-6 w-6 text-blue-600" /> API Connections
         </h1>
         <p className="mt-1 max-w-3xl text-sm text-gray-500">
-          The outside services the app can use. All three are optional; each one turns on extra features. Keys are
+          How the app reaches Southwest, and the outside services it can use. The outside services are optional; each one turns on extra features. Keys are
           stored encrypted on this computer, and changes apply within a minute with no restart. A value saved here
           takes the place of the same setting in the .env file.
         </p>
@@ -220,6 +220,49 @@ export default function ConnectionsPage() {
         </p>
       )}
       {error && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+
+      {/* How the app talks to Southwest */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2">
+              <Globe className="h-5 w-5 text-blue-600" /> Southwest connection
+            </CardTitle>
+            <Badge variant="success">
+              {form.SOUTHWEST_PHONE_APP === "true" ? "Website + phone-app service" : "Website only"}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-gray-600">
+          <p>
+            The app works through southwest.com in its own Chrome window, the same way you would: it checks in,
+            looks up reservations, reads your trips and picks seats on the website.
+          </p>
+          <label className="flex items-start gap-2 text-gray-800">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={form.SOUTHWEST_PHONE_APP === "true"}
+              disabled={!editable}
+              onChange={(e) => set("SOUTHWEST_PHONE_APP", e.target.checked ? "true" : "false")}
+            />
+            <span>
+              Also use Southwest&apos;s phone-app service (optional)
+              <span className="block text-xs text-gray-500">
+                Adds fare-drop checks on flights you&apos;ve booked and a faster check-in, with the website as backup.
+                Leave it off if you see mobile-site errors like &quot;Error 404040404&quot;.
+              </span>
+            </span>
+          </label>
+          {editable && (
+            <div className="flex justify-end">
+              <Button onClick={() => save("southwest", ["SOUTHWEST_PHONE_APP"])} disabled={saving !== null}>
+                {saving === "southwest" ? "Saving..." : saved === "southwest" ? "Saved" : "Save"}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* LM Studio */}
       <Card>

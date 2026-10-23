@@ -31,6 +31,9 @@ class Session:
     def make_request(self, *a, **k) -> dict:
         raise RequestError("Forbidden (403)")
 
+    def restore(self, timeout: int = 0) -> None:
+        self._load_mobile_site(timeout)
+
     def _load_mobile_site(self, timeout: int = 0) -> None:
         self.restored += 1
 
@@ -46,6 +49,7 @@ def worker(db_conn, monkeypatch):  # noqa: ANN001, ANN201
     return w
 
 
+@pytest.mark.usefixtures("phone_app")
 def test_website_finds_flights_when_phone_app_fails(worker, db_conn, monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         wc,
@@ -77,6 +81,7 @@ def test_website_finds_flights_when_phone_app_fails(worker, db_conn, monkeypatch
     assert worker.browser_session.restored == 1
 
 
+@pytest.mark.usefixtures("phone_app")
 def test_both_fail_backs_off_and_says_why(worker, db_conn, monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         wc,

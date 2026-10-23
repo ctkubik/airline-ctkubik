@@ -25,6 +25,8 @@ export const SETTINGS: Record<string, SettingDef> = {
   LLM_MODEL: { default: "", kind: "text" },
   LLM_TIMEOUT: { default: "60", kind: "int" },
   LLM_API_KEY: { secret: true, default: "", kind: "text" },
+  // Southwest's phone-app service; off means the website does everything
+  SOUTHWEST_PHONE_APP: { default: "", kind: "bool" },
 };
 
 export type SettingSource = "app" | "env" | "default";
