@@ -324,6 +324,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE notification_configs ADD COLUMN label TEXT DEFAULT ''")
     if nc_cols and "account_ids" not in nc_cols:
         conn.execute("ALTER TABLE notification_configs ADD COLUMN account_ids TEXT")
+    # Last delivery result per service, shown on the Settings page
+    for col, ddl in (
+        ("last_status", "last_status TEXT"),
+        ("last_error", "last_error TEXT"),
+        ("last_sent_at", "last_sent_at TEXT"),
+    ):
+        if nc_cols and col not in nc_cols:
+            conn.execute(f"ALTER TABLE notification_configs ADD COLUMN {ddl}")
     res_cols = [row[1] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()]
     if res_cols and "owner_account_id" not in res_cols:
         conn.execute("ALTER TABLE reservations ADD COLUMN owner_account_id TEXT")

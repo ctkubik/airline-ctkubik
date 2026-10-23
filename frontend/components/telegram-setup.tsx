@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { CheckCircle2, ExternalLink, Send, XCircle } from "lucide-react";
+import { CheckCircle2, ExternalLink, Eye, EyeOff, Send, XCircle } from "lucide-react";
 
 interface Chat {
   id: string;
@@ -21,6 +21,7 @@ interface AccountOption {
 interface Result {
   ok: boolean;
   message: string;
+  steps?: { step: string; ok: boolean; detail: string }[];
 }
 
 const LEVELS = [
@@ -49,7 +50,18 @@ function Message({ result }: { result: Result | null }) {
       }`}
     >
       {result.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}
-      <span>{result.message}</span>
+      <div>
+        <p>{result.message}</p>
+        {result.steps && result.steps.length > 0 && (
+          <ul className="mt-1 space-y-0.5 text-xs">
+            {result.steps.map((s, i) => (
+              <li key={i}>
+                {s.ok ? "✓" : "✗"} <span className="font-medium">{s.step}:</span> {s.detail}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -58,6 +70,7 @@ function Message({ result }: { result: Result | null }) {
 // app find the chat, send a test, and save it as an alert service.
 export function TelegramSetup({ onSaved }: { onSaved: () => void }) {
   const [token, setToken] = useState("");
+  const [showToken, setShowToken] = useState(true);
   const [bot, setBot] = useState<{ name: string; link: string | null } | null>(null);
   const [chats, setChats] = useState<Chat[] | null>(null);
   const [chatId, setChatId] = useState("");
@@ -113,6 +126,7 @@ export function TelegramSetup({ onSaved }: { onSaved: () => void }) {
 
   async function test() {
     setBusy("test");
+    setSaveResult(null);
     setTestResult(await call("test", { chat_id: chatId }));
     setBusy(null);
   }
@@ -188,14 +202,20 @@ export function TelegramSetup({ onSaved }: { onSaved: () => void }) {
               Copy the whole thing and paste it below. Treat it like a password.
             </li>
           </ol>
-          <div className="pl-8">
+          <div className="flex gap-2 pl-8">
             <Input
-              type="password"
+              type={showToken ? "text" : "password"}
               autoComplete="off"
+              spellCheck={false}
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="Paste the bot token from BotFather"
+              className="font-mono"
             />
+            <Button type="button" variant="outline" onClick={() => setShowToken(!showToken)}>
+              {showToken ? <EyeOff className="mr-1 h-4 w-4" /> : <Eye className="mr-1 h-4 w-4" />}
+              {showToken ? "Hide" : "Show"}
+            </Button>
           </div>
         </div>
 
@@ -237,6 +257,24 @@ export function TelegramSetup({ onSaved }: { onSaved: () => void }) {
               {busy === "find" ? "Looking..." : "Find my chat"}
             </Button>
             <Message result={findResult} />
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-gray-600">
+                Chat ID {chats && chats.length > 0 ? "(pick a chat below, or type it)" : "(or type it here)"}
+              </label>
+              <Input
+                value={chatId}
+                onChange={(e) => setChatId(e.target.value.trim())}
+                placeholder="e.g. 123456789, or -1001234567890 for a group"
+                className="max-w-xs font-mono"
+              />
+              <p className="text-xs text-gray-500">
+                If Find my chat doesn&apos;t work, message{" "}
+                <a className="text-sky-700 underline" href="https://t.me/userinfobot" target="_blank" rel="noreferrer">
+                  @userinfobot
+                </a>{" "}
+                in Telegram. It replies with your ID. Type that number here.
+              </p>
+            </div>
             {chats && chats.length > 0 && (
               <div className="space-y-1">
                 {chats.map((c) => (
@@ -328,6 +366,27 @@ export function TelegramSetup({ onSaved }: { onSaved: () => void }) {
             <li>
               <b>Alerts stopped:</b> you may have muted or blocked the bot. Open it in Telegram and tap Unblock or Unmute.
               Click Send Test Notification further down this page to check.
+            </li>
+            <li>
+              <b>&quot;Bot can&apos;t initiate conversation&quot;:</b> Telegram bots can&apos;t message you first. Open
+              your bot, tap <b>Start</b>, then test again.
+            </li>
+            <li>
+              <b>Find my chat says the bot uses a webhook, or another program is reading it:</b> the bot is in use by
+              another app. Type your chat ID by hand (from @userinfobot), or make a new bot just for these alerts.
+            </li>
+            <li>
+              <b>Group alerts stopped after a while:</b> Telegram gives a group a new ID when it becomes a supergroup.
+              Click <b>Test</b> on the service below. The app finds the new ID and saves it.
+            </li>
+            <li>
+              <b>The test works here but real alerts never arrive:</b> real alerts are sent by the check-in worker.
+              Check the Dashboard for a worker warning, and look at the result under each service below. On the Mac,
+              restart it with <code>~/airline-ctkubik/macos/ctl.sh restart</code>.
+            </li>
+            <li>
+              <b>See or fix what&apos;s saved:</b> click <b>Show</b> on the Telegram service below to see the bot token
+              and chat ID, and edit them if needed.
             </li>
             <li>
               <b>Token leaked or shared by mistake:</b> send BotFather <code>/revoke</code>, pick the bot, delete the old

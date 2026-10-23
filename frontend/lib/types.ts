@@ -60,6 +60,10 @@ export interface NotificationConfig {
   label?: string;
   // JSON array of Southwest account ids; null/empty = everyone
   account_ids?: string | null;
+  // Last delivery result, written by the worker and the Test button
+  last_status?: "ok" | "failed" | null;
+  last_error?: string | null;
+  last_sent_at?: string | null;
 }
 
 export interface WorkerLog {

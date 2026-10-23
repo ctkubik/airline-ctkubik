@@ -1651,22 +1651,40 @@ def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
 
 
 def process_test_notifications(conn: sqlite3.Connection) -> None:
-    """Check for test notification requests and send them."""
+    """Send test messages the dashboard asked for and log each service's result.
+
+    '__TEST_NOTIFICATION__' tests every service; '__TEST_NOTIFICATION__:<id>'
+    tests one.
+    """
     rows = conn.execute(
-        "SELECT id FROM worker_logs WHERE message = '__TEST_NOTIFICATION__' ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, message FROM worker_logs WHERE message LIKE '__TEST_NOTIFICATION__%' "
+        "ORDER BY created_at DESC LIMIT 5"
     ).fetchall()
-    if rows:
-        # Delete the test markers
-        for row in rows:
-            conn.execute("DELETE FROM worker_logs WHERE id = ?", (row["id"],))
-        conn.commit()
-        # Send the test notification
+    if not rows:
+        return
+    targets: set[str | None] = set()
+    for row in rows:
+        conn.execute("DELETE FROM worker_logs WHERE id = ?", (row["id"],))
+        _, _, config_id = row["message"].partition(":")
+        targets.add(config_id or None)
+    conn.commit()
+    if None in targets:
+        targets = {None}
+    from notifications import notify_test
+
+    for config_id in targets:
         try:
-            from notifications import notify_test
-            notify_test()
-            add_log(conn, "Test notification sent successfully", "info")
+            results = notify_test(config_id)
         except Exception as e:
             add_log(conn, f"Test notification failed: {e}", "error")
+            continue
+        if not results:
+            add_log(conn, "Test notification: no active notification services", "warning")
+        for r in results:
+            if r["ok"]:
+                add_log(conn, f"Test notification delivered to {r['label']}", "info")
+            else:
+                add_log(conn, f"Test notification to {r['label']} failed: {r['error']}", "error")
 
 
 def run_daily_cleanup(conn: sqlite3.Connection) -> None:

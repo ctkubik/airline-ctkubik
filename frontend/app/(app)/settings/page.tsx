@@ -6,10 +6,11 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Trash2, Plus, MessageSquare, CalendarDays } from "lucide-react";
+import { Plus, MessageSquare, CalendarDays } from "lucide-react";
 import type { NotificationConfig } from "@/lib/types";
 import { SeatPreferencesForm } from "@/components/seat-preferences-form";
 import { TelegramSetup } from "@/components/telegram-setup";
+import { NotificationServiceRow } from "@/components/notification-service-row";
 
 
 // Matches worker/notifications.py: which alerts a service receives
@@ -49,7 +50,7 @@ export default function SettingsPage() {
   const [serviceWho, setServiceWho] = useState("");
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Twilio SMS quick setup
   const [twilioSid, setTwilioSid] = useState("");
@@ -124,18 +125,42 @@ export default function SettingsPage() {
     fetchNotifications();
   }
 
+  // Queue a test for every service, then refresh until each one shows a
+  // fresh result (the worker sends them and saves the outcome)
   async function testNotifications() {
     setTestResult(null);
     const res = await fetch("/api/notifications/test", { method: "POST" });
     const data = await res.json();
-    if (res.ok) {
-      setTestResult(data.message);
-    } else {
-      setTestResult(data.error || "Test failed");
+    if (!res.ok) {
+      setTestResult({ ok: false, message: data.error || "Test failed" });
+      return;
     }
-    setTimeout(() => setTestResult(null), 5000);
+    if (data.worker_problem) {
+      setTestResult({ ok: false, message: data.worker_problem });
+      return;
+    }
+    setTestResult({ ok: true, message: data.message });
+    const started = new Date(data.queued_at).getTime() - 5000;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const list = (await fetch("/api/notifications", { cache: "no-store" }).then((r) => r.json())) as NotificationConfig[];
+      setNotifications(list);
+      const fresh = list.filter((n) => n.last_sent_at && new Date(n.last_sent_at).getTime() >= started);
+      if (fresh.length >= list.filter((n) => n.is_active).length) {
+        const failed = fresh.filter((n) => n.last_status === "failed").length;
+        setTestResult(
+          failed
+            ? { ok: false, message: `${failed} of ${fresh.length} service(s) failed. The reason shows under each one.` }
+            : { ok: true, message: `Delivered to all ${fresh.length} service(s).` }
+        );
+        return;
+      }
+    }
+    setTestResult({
+      ok: false,
+      message: "The worker didn't answer within a minute. It may be stopped. Restart it on the Mac with ~/airline-ctkubik/macos/ctl.sh restart",
+    });
   }
-
 
   async function addTwilioSms(e: React.FormEvent) {
     e.preventDefault();
@@ -320,54 +345,19 @@ export default function SettingsPage() {
             <>
               <div className="space-y-2">
                 {notifications.map((n) => (
-                  <div
+                  <NotificationServiceRow
                     key={n.id}
-                    className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <Input
-                        defaultValue={n.label || ""}
-                        placeholder="Add a name"
-                        className="h-8 w-48 text-sm"
-                        onBlur={(e) => {
-                          if (e.target.value !== (n.label || "")) updateNotification(n.id, { label: e.target.value });
-                        }}
-                      />
-                      <code className="mt-1 block text-xs text-gray-400">{n.service_url}</code>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={whoValue(n.account_ids)}
-                        onChange={(e) =>
-                          updateNotification(n.id, { account_ids: e.target.value ? [e.target.value] : null })
-                        }
-                        className="rounded-md border border-gray-300 px-2 py-1 text-xs"
-                        aria-label="Whose alerts"
-                      >
-                        <option value="">Everyone&apos;s trips</option>
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            Only {accountName(a)}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={Math.min(Math.max(n.notification_level, 1), 3)}
-                        onChange={(e) => updateNotification(n.id, { notification_level: Number(e.target.value) })}
-                        className="rounded-md border border-gray-300 px-2 py-1 text-xs"
-                        aria-label="Which alerts"
-                      >
-                        {LEVELS.map((l) => (
-                          <option key={l.value} value={l.value}>
-                            {l.label}
-                          </option>
-                        ))}
-                      </select>
-                      <Button variant="ghost" size="icon" onClick={() => deleteNotification(n.id)}>
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </div>
+                    n={n}
+                    whoValue={whoValue(n.account_ids)}
+                    whoOptions={[
+                      { value: "", label: "Everyone's trips" },
+                      ...accounts.map((a) => ({ value: a.id, label: `Only ${accountName(a)}` })),
+                    ]}
+                    levelOptions={LEVELS}
+                    onChange={(patch) => updateNotification(n.id, patch)}
+                    onDelete={() => deleteNotification(n.id)}
+                    onRefresh={fetchNotifications}
+                  />
                 ))}
               </div>
               <div className="flex items-center gap-3">
@@ -375,7 +365,9 @@ export default function SettingsPage() {
                   Send Test Notification
                 </Button>
                 {testResult && (
-                  <span className="text-sm text-green-600">{testResult}</span>
+                  <span className={`text-sm ${testResult.ok ? "text-green-700" : "text-red-700"}`}>
+                    {testResult.message}
+                  </span>
                 )}
               </div>
             </>
