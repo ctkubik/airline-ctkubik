@@ -12,6 +12,7 @@ Settings (environment):
                   http://host.docker.internal:1234/v1)
     LLM_MODEL     model id to request; blank = whatever model is loaded
     LLM_TIMEOUT   seconds per request (default 60)
+    LLM_API_KEY   API token, when LM Studio's server requires authentication
 """
 
 from __future__ import annotations
@@ -42,6 +43,10 @@ class LLMClient:
         )
         self.base_url = os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
         self.model = os.environ.get("LLM_MODEL", "").strip()
+        # LM Studio's "Require authentication" server setting: a token is
+        # sent as "Authorization: Bearer <token>"
+        token = os.environ.get("LLM_API_KEY", "").strip()
+        self.headers = {"Authorization": f"Bearer {token}"} if token else {}
         try:
             self.timeout = float(os.environ.get("LLM_TIMEOUT", "60"))
         except ValueError:
@@ -51,7 +56,7 @@ class LLMClient:
         """Use LLM_MODEL, else the first model the server reports as loaded."""
         if self.model:
             return self.model
-        resp = requests.get(f"{self.base_url}/models", timeout=10)
+        resp = requests.get(f"{self.base_url}/models", headers=self.headers, timeout=10)
         resp.raise_for_status()
         ids = [m["id"] for m in resp.json().get("data") or []]
         # Embedding models can't chat; skip them when picking automatically.
@@ -78,6 +83,7 @@ class LLMClient:
                     "max_tokens": max_tokens,
                     "stream": False,
                 },
+                headers=self.headers,
                 timeout=self.timeout,
             )
             resp.raise_for_status()

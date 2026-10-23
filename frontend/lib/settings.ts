@@ -24,6 +24,7 @@ export const SETTINGS: Record<string, SettingDef> = {
   LLM_BASE_URL: { default: "http://localhost:1234/v1", kind: "url" },
   LLM_MODEL: { default: "", kind: "text" },
   LLM_TIMEOUT: { default: "60", kind: "int" },
+  LLM_API_KEY: { secret: true, default: "", kind: "text" },
 };
 
 export type SettingSource = "app" | "env" | "default";

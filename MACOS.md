@@ -206,5 +206,10 @@ downloads a matching driver automatically.
 **Nothing runs after a restart.** Automatic login isn't on (see [Make the Mac start up on its own](#make-the-mac-start-up-on-its-own)), so the services are waiting
 for someone to log in.
 
+**Local AI test says LM Studio is asking for an API token (error 401).** LM Studio's server has
+**Require Authentication** turned on. In LM Studio's Developer tab, open the server settings and
+either turn it off, or click **Manage Tokens**, create a token, and paste it in the **API token** field
+on the API Connections page.
+
 **Local AI test says "Nothing answered".** LM Studio isn't running, its server isn't started, or no model is
 loaded. Check the Developer tab in LM Studio.

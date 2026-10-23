@@ -17,13 +17,22 @@ function baseUrl(): string {
   return (getSetting("LLM_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
+// LM Studio's "Require authentication" server setting
+export function llmHeaders(token = getSetting("LLM_API_KEY")): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 function timeoutMs(): number {
   const seconds = Number(getSetting("LLM_TIMEOUT") || 60);
   return (Number.isFinite(seconds) && seconds > 0 ? seconds : 60) * 1000;
 }
 
 async function listModels(): Promise<string[]> {
-  const res = await fetch(`${baseUrl()}/models`, { signal: AbortSignal.timeout(5000), cache: "no-store" });
+  const res = await fetch(`${baseUrl()}/models`, {
+    headers: llmHeaders(),
+    signal: AbortSignal.timeout(5000),
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error(`LLM server returned ${res.status}`);
   const data = (await res.json()) as { data?: { id: string }[] };
   // Embedding models can't chat; skip them when picking automatically.
@@ -59,7 +68,7 @@ export async function llmChat(system: string, user: string, maxTokens = 512): Pr
     if (!model) return null;
     const res = await fetch(`${baseUrl()}/chat/completions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...llmHeaders() },
       body: JSON.stringify({
         model,
         messages: [

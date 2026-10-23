@@ -155,7 +155,7 @@ export default function ConnectionsPage() {
     setTests((t) => ({ ...t, [service]: null }));
     const body =
       service === "lmstudio"
-        ? { service, base_url: form.LLM_BASE_URL, model: form.LLM_MODEL }
+        ? { service, base_url: form.LLM_BASE_URL, model: form.LLM_MODEL, key: form.LLM_API_KEY }
         : { service, key: form[service === "aerodatabox" ? "AERODATABOX_API_KEY" : "SERPAPI_API_KEY"] };
     const res = await fetch("/api/connections/test", {
       method: "POST",
@@ -255,6 +255,11 @@ export default function ConnectionsPage() {
               &gt; Login Items so it comes back after a restart.
             </li>
             <li>
+              If <b>Require Authentication</b> is on in the Developer tab&apos;s server settings, either turn it off (the
+              server only listens on this Mac) or click <b>Manage Tokens</b>, create a token, and paste it in{" "}
+              <b>API token</b> below. A test that says &quot;asking for an API token&quot; (error 401) means this step.
+            </li>
+            <li>
               Back here, click <b>Test connection</b>, pick the model, turn on <b>Use local AI</b>, and save.
             </li>
           </Steps>
@@ -301,6 +306,13 @@ export default function ConnectionsPage() {
               </select>
             </Field>
             <Field
+              label="API token (only if LM Studio requires one)"
+              source={s.LLM_API_KEY.source}
+              hint="Leave blank when Require Authentication is off in LM Studio."
+            >
+              {keyField("LLM_API_KEY", "Paste the token from LM Studio > Developer > Manage Tokens")}
+            </Field>
+            <Field
               label="Wait for an answer (seconds)"
               source={s.LLM_TIMEOUT.source}
               hint="Raise this for a large or slow model."
@@ -320,7 +332,7 @@ export default function ConnectionsPage() {
                 {testing === "lmstudio" ? "Testing..." : "Test connection"}
               </Button>
               <Button
-                onClick={() => save("llm", ["LLM_ENABLED", "LLM_BASE_URL", "LLM_MODEL", "LLM_TIMEOUT"])}
+                onClick={() => save("llm", ["LLM_ENABLED", "LLM_BASE_URL", "LLM_MODEL", "LLM_TIMEOUT", "LLM_API_KEY"])}
                 disabled={saving !== null}
               >
                 {saving === "llm" ? "Saving..." : saved === "llm" ? "Saved" : "Save"}

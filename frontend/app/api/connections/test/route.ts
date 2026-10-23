@@ -18,7 +18,13 @@ export async function POST(req: NextRequest) {
   try {
     switch (body.service) {
       case "lmstudio":
-        return NextResponse.json(await testLmStudio(body.base_url || getSetting("LLM_BASE_URL"), body.model ?? getSetting("LLM_MODEL")));
+        return NextResponse.json(
+          await testLmStudio(
+            body.base_url || getSetting("LLM_BASE_URL"),
+            body.model ?? getSetting("LLM_MODEL"),
+            keyFor("LLM_API_KEY")
+          )
+        );
       case "aerodatabox":
         return NextResponse.json(await testAeroDataBox(keyFor("AERODATABOX_API_KEY")));
       case "serpapi":
@@ -38,16 +44,24 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function testLmStudio(baseUrl: string, model: string) {
+const LM_AUTH_HELP =
+  "LM Studio is asking for an API token. Either turn off \"Require Authentication\" in LM Studio's " +
+  "Developer tab (Server Settings), or create a token there and paste it in the API token field.";
+
+async function testLmStudio(baseUrl: string, model: string, token: string) {
   const base = baseUrl.replace(/\/+$/, "");
+  const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   let res: Response;
   try {
-    res = await fetch(`${base}/models`, { signal: AbortSignal.timeout(5000), cache: "no-store" });
+    res = await fetch(`${base}/models`, { headers: auth, signal: AbortSignal.timeout(5000), cache: "no-store" });
   } catch {
     return {
       ok: false,
       message: `Nothing answered at ${base}. Open LM Studio, go to the Developer tab, and start the server.`,
     };
+  }
+  if (res.status === 401 || res.status === 403) {
+    return { ok: false, message: token ? "LM Studio didn't accept that API token. Copy it again from LM Studio." : LM_AUTH_HELP };
   }
   if (!res.ok) return { ok: false, message: `LM Studio answered with error ${res.status}.` };
   const data = (await res.json()) as { data?: { id: string }[] };
@@ -59,7 +73,7 @@ async function testLmStudio(baseUrl: string, model: string) {
   const started = Date.now();
   const chat = await fetch(`${base}/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...auth },
     body: JSON.stringify({
       model: use,
       messages: [
