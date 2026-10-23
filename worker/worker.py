@@ -1443,6 +1443,109 @@ def run_loyalty_syncs(conn: sqlite3.Connection) -> None:
     loyalty_runner.poll(conn, f"check-in for {soon} within an hour" if soon else None)
 
 
+def process_connection_tests(conn: sqlite3.Connection) -> None:
+    """Dashboard "Test check-in connection": prove both check-in paths work now.
+
+    1. The phone-app path: a live session and Southwest returning the
+       reservation (the same lookup the check-in starts with).
+    2. The website backup: southwest.com's check-in page loads and the form
+       fills in. It's only submitted while check-in isn't open yet (Southwest
+       then just says it's too early), so the test never checks anyone in.
+    The result goes to system_state for the dashboard to show.
+    """
+    import safety_net
+    from lib.web_checkin import classify_page, web_check_in
+
+    row = conn.execute("SELECT value FROM system_state WHERE key = 'connection_test_request'").fetchone()
+    if not row or not row["value"]:
+        return
+    conn.execute("DELETE FROM system_state WHERE key = 'connection_test_request'")
+    conn.commit()
+    try:
+        flight_id = json.loads(row["value"]).get("flight_id")
+    except (TypeError, ValueError):
+        return
+    flight = conn.execute(
+        "SELECT f.*, r.confirmation_number, r.first_name, r.last_name "
+        "FROM flights f JOIN reservations r ON r.id = f.reservation_id WHERE f.id = ?",
+        (flight_id,),
+    ).fetchone()
+    if not flight:
+        return
+    flight = dict(flight)
+    steps: list[dict] = []
+
+    def save(done: bool) -> None:
+        safety_net.set_state(conn, f"connection_test:{flight_id}", json.dumps({
+            "done": done,
+            "ok": done and all(s["ok"] for s in steps),
+            "steps": steps,
+            "checked_at": datetime.utcnow().isoformat() + "Z",
+        }))
+
+    soon = _checkin_within(0.5)
+    if soon:
+        steps.append({"name": "Browser", "ok": False, "detail": f"Busy: a check-in for {soon} is under 30 minutes away. Try after it."})
+        save(True)
+        return
+    save(False)
+
+    # 1. Phone-app path
+    try:
+        browser_session.ensure_alive()
+        ok = bool(browser_session.headers)
+        steps.append({"name": "Southwest session", "ok": ok,
+                      "detail": f"Connected ({len(browser_session.headers)} security headers)" if ok
+                      else "The browser is up but Southwest didn't hand over a session"})
+    except Exception as e:
+        steps.append({"name": "Southwest session", "ok": False, "detail": f"Couldn't start: {str(e).splitlines()[0][:200]}"})
+    save(False)
+    if steps[-1]["ok"]:
+        problems = safety_net.check_flight_readiness(flight, browser_session, handler=None)
+        problems = [p for p in problems if "isn't queued" not in p]
+        steps.append({"name": "Check-in service (phone-app path)", "ok": not problems,
+                      "detail": "Southwest returned the reservation; check-in will go through this path"
+                      if not problems else "; ".join(problems)})
+        save(False)
+
+    # 2. Website backup
+    departure = datetime.fromisoformat(flight["departure_time"].replace("Z", "+00:00"))
+    if departure.tzinfo is None:
+        departure = departure.replace(tzinfo=timezone.utc)
+    opens = departure - timedelta(hours=int(flight.get("checkin_hours") or 24))
+    submit = opens - datetime.now(timezone.utc) > timedelta(minutes=10)
+    try:
+        with browser_session._lock:
+            result = web_check_in(
+                browser_session._driver, flight["confirmation_number"], flight["first_name"],
+                flight["last_name"], capture_dir=os.path.join(CAPTURES_DIR, flight_id, "connection_test"),
+                submit=False,
+            )
+            if result["ok"] and submit:
+                # Look the reservation up; before check-in opens Southwest only says "too early"
+                from lib.web_checkin import click_checkin
+                click_checkin(browser_session._driver, "the button that looks up the reservation to check in")
+                time.sleep(8)
+                text = browser_session._driver.execute_script("return document.body ? document.body.innerText : ''") or ""
+                status = classify_page(text)
+                if status == "not_found":
+                    result = {"ok": False, "message": "southwest.com couldn't find the reservation with that name"}
+                elif status == "blocked":
+                    result = {"ok": False, "message": "Southwest blocked the website check-in page"}
+                else:
+                    result = {"ok": True, "message": "southwest.com found the reservation (check-in isn't open yet, so nothing was submitted)"}
+            try:
+                browser_session._load_mobile_site(timeout=90)
+            except Exception as e:
+                logger.warning("Couldn't restore the mobile site after the connection test: %s", e)
+        steps.append({"name": "Website backup (southwest.com)", "ok": bool(result["ok"]), "detail": result["message"]})
+    except Exception as e:
+        steps.append({"name": "Website backup (southwest.com)", "ok": False, "detail": f"Couldn't run: {str(e).splitlines()[0][:200]}"})
+    save(True)
+    add_log(conn, f"Connection test for {flight['confirmation_number']}: " + "; ".join(
+        f"{s['name']}: {'OK' if s['ok'] else 'problem'}" for s in steps), "info", flight_id)
+
+
 def process_manual_seat_checks(conn: sqlite3.Connection) -> None:
     """Check for manual seat check requests and execute them."""
     # '_' is a single-character wildcard in LIKE — escape it so this matches
@@ -1658,6 +1761,7 @@ def main_loop() -> None:
                 # Seat upgrades for A-List accounts (48h before departure)
                 ("seat upgrades", lambda: attempt_seat_upgrades(conn)),
                 ("manual seat checks", lambda: process_manual_seat_checks(conn)),
+                ("connection tests", lambda: process_connection_tests(conn)),
                 ("test notifications", lambda: process_test_notifications(conn)),
                 ("daily cleanup", lambda: run_daily_cleanup(conn)),
             ):

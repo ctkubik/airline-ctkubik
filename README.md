@@ -42,6 +42,8 @@ A web application that automatically checks you in to your Southwest Airlines fl
 
 ### Core
 - **Automatic Check-In**: Checks in to flights exactly 24 hours before departure
+- **Website Backup for Check-In**: If the phone-app check-in service fails at check-in time, the app checks you in on southwest.com in the browser instead (the local AI helps when Southwest moves a button)
+- **Test Check-In Connection**: A button on each upcoming flight proves both check-in paths work today (live Southwest session, reservation lookup, and the southwest.com check-in page) without checking anyone in
 - **Missed-Check-In Safety Net**: In the 3 hours before each check-in the app confirms it will work (check-in queued, browser up, Southwest returns the reservation) and texts you if not; alerts at once if a check-in time passes without a check-in; a separate watchdog alerts if the worker dies; optional [healthchecks.io](https://healthchecks.io) ping for when the whole machine is down
 - **Savings Tracker**: Totals fare drops found and credit you claimed by rebooking, with claim steps on each drop
 - **Calendar Feed**: Private subscription link for Apple/Google/Outlook calendars with every flight and check-in time

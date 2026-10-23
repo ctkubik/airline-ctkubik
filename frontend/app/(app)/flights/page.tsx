@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/flights/status-badge";
 import { CountdownTimer } from "@/components/flights/countdown-timer";
+import { ConnectionTest } from "@/components/flights/connection-test";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Camera } from "lucide-react";
@@ -336,6 +337,10 @@ export default function FlightsPage() {
                     </Button>
                   </div>
                 </div>
+
+                {(flight.checkin_status === "pending" || flight.checkin_status === "scheduled") && (
+                  <ConnectionTest flightId={flight.id} />
+                )}
 
                 {/* Row 2: Better flight alternative (only when actually cheaper) */}
                 {altIsCheaper && (

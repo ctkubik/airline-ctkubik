@@ -4,6 +4,7 @@ and writes status updates to the database."""
 from __future__ import annotations
 
 import json
+import os
 import time
 import threading
 from datetime import datetime, timedelta
@@ -217,6 +218,59 @@ class CheckInHandler:
             self._stop_event.wait(timeout=sleep_time)
             total_sleep_time -= sleep_time
 
+    def _web_fallback(self, capture) -> bool | None:  # noqa: ANN001
+        """The phone-app path failed: try checking in on southwest.com instead.
+
+        Returns True when the website checked the passenger in (status and
+        alert already recorded), False when the website also can't (too
+        early, airport check-in, not found), and None when it couldn't run.
+        """
+        session = self.browser_session
+        driver = getattr(session, "_driver", None) if session else None
+        if session is None or driver is None:
+            return None
+        from .config import CAPTURES_DIR
+        from .web_checkin import web_check_in
+
+        logger.info("Phone-app check-in failed for %s; trying southwest.com", self.confirmation_number)
+        try:
+            with session._lock:
+                result = web_check_in(
+                    session._driver,
+                    self.confirmation_number,
+                    self.first_name,
+                    self.last_name,
+                    capture_dir=os.path.join(CAPTURES_DIR, self.flight_db_id),
+                )
+                # Put the browser back on the mobile site for the next check-in
+                try:
+                    session._load_mobile_site(timeout=60)
+                except Exception as err:  # noqa: BLE001
+                    logger.warning("Couldn't restore the mobile site after website check-in: %s", err)
+        except Exception as err:  # noqa: BLE001
+            logger.warning("Website check-in failed to run: %s", err)
+            return None
+        self._log_diagnostic(
+            "checkin_website_fallback",
+            "southwest.com check-in page",
+            "Checked in on the website",
+            f"{result['status']}: {result['message']}",
+        )
+        if result["ok"]:
+            self._update_status("success", json.dumps({"method": "website", "message": result["message"]}))
+            logger.info("Checked in on southwest.com for flight %s", self.flight_db_id)
+            self._send_notification(True)
+            try:
+                capture.finish_capture(success=True)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+        if result["status"] == "airport":
+            self._update_status("failed", "Airport check-in required")
+            self._send_notification(False, "Airport check-in required")
+            return True
+        return False
+
     def _save_checkin_hours(self, hours: int) -> None:
         try:
             conn = self.db_conn_factory()
@@ -257,6 +311,8 @@ class CheckInHandler:
             return True
         except RequestError as err:
             logger.debug("Failed to check in. Error: %s", err)
+            if self._web_fallback(capture):
+                return True  # checked in (or settled) on southwest.com
             if not final:
                 self._log_diagnostic("checkin_early_refused",
                                      f"early check-in for {self.confirmation_number}",
@@ -272,6 +328,8 @@ class CheckInHandler:
             capture.finish_capture(success=False)
             return True
         except Exception as err:  # noqa: BLE001
+            if self._web_fallback(capture):
+                return True  # checked in (or settled) on southwest.com
             # An early attempt can also come back in an unexpected shape
             # (no check-in link yet); that's a refusal, not a failure.
             if final:
