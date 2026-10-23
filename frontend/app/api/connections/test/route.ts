@@ -67,7 +67,32 @@ async function testLmStudio(baseUrl: string, model: string, token: string) {
   const data = (await res.json()) as { data?: { id: string }[] };
   const models = (data.data || []).map((m) => m.id).filter((id) => !id.toLowerCase().includes("embed"));
   if (!models.length) {
-    return { ok: false, models, message: "LM Studio is running but no chat model is loaded. Load one in LM Studio." };
+    // LM Studio's own API lists downloaded models too (state "loaded" / "not-loaded")
+    let downloaded: string[] = [];
+    try {
+      const native = await fetch(`${base.replace(/\/v1$/, "")}/api/v0/models`, {
+        headers: auth,
+        signal: AbortSignal.timeout(5000),
+        cache: "no-store",
+      });
+      if (native.ok) {
+        const list = ((await native.json()) as { data?: { id: string; type?: string }[] }).data || [];
+        downloaded = list.filter((m) => m.type !== "embeddings" && !m.id.toLowerCase().includes("embed")).map((m) => m.id);
+      }
+    } catch {
+      // older LM Studio without the native API
+    }
+    return {
+      ok: false,
+      models,
+      message: downloaded.length
+        ? `LM Studio is running, but no model is loaded. You have ${downloaded.slice(0, 3).join(", ")}${
+            downloaded.length > 3 ? ` and ${downloaded.length - 3} more` : ""
+          } downloaded. In LM Studio press Cmd+L, pick one, set Context Length to 16384, and click Load. ` +
+          "Or turn on Just-in-Time model loading in Developer > Server Settings so the app can load it when needed."
+        : "LM Studio is running, but no model is downloaded or loaded. In LM Studio open Discover, download a chat " +
+          "model (for example Qwen3 8B, MLX 4-bit), then press Cmd+L to load it.",
+    };
   }
   const use = model && models.includes(model) ? model : models[0];
   const started = Date.now();

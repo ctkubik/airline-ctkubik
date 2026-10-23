@@ -247,7 +247,10 @@ export default function ConnectionsPage() {
               16 GB Mac.
             </li>
             <li>
-              Load the model and set its <b>context length to 16384 or more</b> (seat maps are long).
+              Press <b>Cmd+L</b> (or click <b>Select a model to load</b> at the top), pick the model, set its{" "}
+              <b>Context Length to 16384 or more</b> (seat maps are long), and click <b>Load</b>. In the Developer
+              tab&apos;s server settings, turn on <b>Just-in-Time model loading</b> so the model comes back by itself
+              after LM Studio or the Mac restarts.
             </li>
             <li>
               Open the <b>Developer</b> tab and switch the server on (Status: Running, port 1234). In LM Studio&apos;s
