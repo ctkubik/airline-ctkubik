@@ -122,7 +122,14 @@ def process_reservation(
             response_snapshot=resp_body[:500],
         )
         add_log(conn, f"Failed to retrieve reservation {confirmation_number}: {err}", "error")
+        process_reservation.last_error = err_str
         return []
+    except Exception as err:
+        # Anything else (browser down, no session) is a failed lookup too
+        process_reservation.last_error = str(err).splitlines()[0][:200] if str(err) else type(err).__name__
+        add_log(conn, f"Failed to retrieve reservation {confirmation_number}: {process_reservation.last_error}", "error")
+        return []
+    process_reservation.last_error = ""
 
     reservation_info = response.get("viewReservationViewPage", {})
     bounds = reservation_info.get("bounds", [])
@@ -392,23 +399,101 @@ def process_accounts(conn: sqlite3.Connection) -> None:
         last_account_check[account_id] = time.time()
 
 
+LOOKUP_RETRY_MINUTES = (15, 30, 60, 120)  # after 1, 2, 3, 4+ failures in a row
+
+
+def _local_to_utc(local: str, airport: str) -> str | None:
+    """'2026-11-20T08:00' at 'PHX' -> UTC ISO string, or None for an unknown airport."""
+    import zoneinfo
+    from pathlib import Path
+
+    try:
+        zones = json.loads((Path(__file__).parent / "utils" / "airport_timezones.json").read_text())
+        tz = zoneinfo.ZoneInfo(zones[airport.upper()])
+        return datetime.fromisoformat(local).replace(tzinfo=tz).astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _set_lookup(conn: sqlite3.Connection, res_id: str, status: str, message: str, failures: int, retry_minutes: float) -> None:
+    now = datetime.utcnow()
+    conn.execute(
+        "UPDATE reservations SET lookup_status = ?, lookup_message = ?, lookup_checked_at = ?, "
+        "next_lookup_at = ?, lookup_failures = ? WHERE id = ?",
+        (status, message[:500], now.isoformat(), (now + timedelta(minutes=retry_minutes)).isoformat(), failures, res_id),
+    )
+    conn.commit()
+
+
+def _web_lookup(conn: sqlite3.Connection, res: dict) -> tuple[int, str]:
+    """Look a reservation up on southwest.com and save its flights. Returns (count, message)."""
+    from lib.web_checkin import web_lookup_flights
+
+    if not browser_session or not browser_session._driver:
+        return 0, "the browser isn't running"
+    with browser_session._lock:
+        try:
+            result = web_lookup_flights(
+                browser_session._driver, res["confirmation_number"], res["first_name"], res["last_name"],
+                capture_dir=os.path.join(CAPTURES_DIR, "reservations", res["id"]),
+            )
+        finally:
+            try:
+                browser_session._load_mobile_site(timeout=90)
+            except Exception as e:
+                logger.warning("Couldn't restore the mobile site after the website lookup: %s", e)
+    saved = 0
+    for f in result["flights"]:
+        utc = _local_to_utc(f["departure_local"], f["departure_airport"])
+        if not utc:
+            add_log(conn, f"Skipped flight {f['flight_number']}: unknown time zone for {f['departure_airport']}", "warning")
+            continue
+        upsert_flight(conn, res["id"], f["flight_number"], f["departure_airport"], f["destination_airport"], utc, False)
+        saved += 1
+    return saved, result["message"]
+
+
 def process_manual_reservations(conn: sqlite3.Connection) -> None:
-    """Process reservations not linked to any account."""
+    """Find the flights on reservations added by hand (not from an account login).
+
+    Southwest's phone-app service first; if that fails, the reservation page
+    on southwest.com. A failed lookup is retried after 15 minutes, then less
+    often (up to every 2 hours); a good one is refreshed daily. The result
+    shows on the Reservations page, where "Try again" clears next_lookup_at.
+    """
+    now = datetime.utcnow().isoformat()
     reservations = conn.execute(
-        "SELECT * FROM reservations WHERE account_id IS NULL AND is_active = 1"
+        "SELECT * FROM reservations WHERE account_id IS NULL AND is_active = 1 "
+        "AND (next_lookup_at IS NULL OR next_lookup_at <= ?)",
+        (now,),
     ).fetchall()
 
     for res_row in reservations:
         res = dict(res_row)
-        res_id = res["id"]
-
-        last_check = last_reservation_check.get(res_id, 0)
-        if time.time() - last_check < RETRIEVAL_INTERVAL_DEFAULT:
-            continue
-
         logger.info("Processing reservation: %s", res["confirmation_number"])
-        process_reservation(conn, res)
-        last_reservation_check[res_id] = time.time()
+        failures = int(res.get("lookup_failures") or 0)
+        flights = process_reservation(conn, res)
+        if flights:
+            _set_lookup(conn, res["id"], "ok", f"Found {len(flights)} flight(s) with Southwest", 0, 24 * 60)
+            continue
+        mobile_error = (getattr(process_reservation, "last_error", "") or "Southwest returned no flights")
+        try:
+            saved, message = _web_lookup(conn, res)
+        except Exception as e:
+            saved, message = 0, f"website lookup failed: {e}"
+        if saved:
+            _set_lookup(conn, res["id"], "ok", f"Found {saved} flight(s) on southwest.com", 0, 24 * 60)
+            add_log(conn, f"Reservation {res['confirmation_number']}: {message}", "info")
+            continue
+        failures += 1
+        retry = LOOKUP_RETRY_MINUTES[min(failures, len(LOOKUP_RETRY_MINUTES)) - 1]
+        has_flights = conn.execute("SELECT 1 FROM flights WHERE reservation_id = ? LIMIT 1", (res["id"],)).fetchone()
+        _set_lookup(
+            conn, res["id"], "ok" if has_flights else "error",
+            f"Couldn't look up the flights (phone-app service: {mobile_error[:150]}; website: {message}). "
+            f"Trying again in {retry} minutes" + ("" if has_flights else ", or add the flights by hand."),
+            failures, retry,
+        )
 
 
 last_fare_check: float = 0

@@ -333,6 +333,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if fw_cols and "provider" not in fw_cols:
         conn.execute("ALTER TABLE fare_watches ADD COLUMN provider TEXT DEFAULT 'amadeus'")
 
+    # Manual reservations: result of the last flight lookup and when to retry
+    res_cols = [row[1] for row in conn.execute("PRAGMA table_info(reservations)").fetchall()]
+    for col, ddl in (
+        ("lookup_status", "lookup_status TEXT"),
+        ("lookup_message", "lookup_message TEXT"),
+        ("lookup_checked_at", "lookup_checked_at TEXT"),
+        ("next_lookup_at", "next_lookup_at TEXT"),
+        ("lookup_failures", "lookup_failures INTEGER DEFAULT 0"),
+    ):
+        if res_cols and col not in res_cols:
+            conn.execute(f"ALTER TABLE reservations ADD COLUMN {ddl}")
+
     # When check-in opens for this flight: 48 hours for A-List, else 24
     # (worker.py schedule_pending_flights; back to 24 if Southwest refuses early)
     flight_cols = [row[1] for row in conn.execute("PRAGMA table_info(flights)").fetchall()]

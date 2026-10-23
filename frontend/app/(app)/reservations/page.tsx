@@ -17,6 +17,7 @@ import {
 import { Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import type { Reservation } from "@/lib/types";
 import { EmailImport } from "@/components/reservations/email-import";
+import { FlightLookup } from "@/components/reservations/flight-lookup";
 
 export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -28,6 +29,12 @@ export default function ReservationsPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [ownerId, setOwnerId] = useState("");
   const [accounts, setAccounts] = useState<{ id: string; display_name: string; username: string }[]>([]);
+
+  // Refresh while the worker looks flights up, so the status updates by itself
+  useEffect(() => {
+    const t = setInterval(fetchReservations, 20000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     fetchReservations();
@@ -243,6 +250,15 @@ export default function ReservationsPage() {
                       </Button>
                     </div>
                   </div>
+                  {!res.account_id && (
+                    <FlightLookup
+                      reservationId={res.id}
+                      status={res.lookup_status}
+                      message={res.lookup_message}
+                      hasFlights={(res.flights?.length ?? 0) > 0}
+                      onChanged={fetchReservations}
+                    />
+                  )}
                   {expanded.has(res.id) && res.flights && res.flights.length > 0 && (
                     <div className="border-t border-gray-100 bg-gray-50 p-4 overflow-x-auto">
                       <table className="w-full text-sm">

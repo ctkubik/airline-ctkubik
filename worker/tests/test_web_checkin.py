@@ -159,7 +159,7 @@ def test_handler_falls_back_to_website(db_conn, monkeypatch) -> None:  # noqa: A
     assert handler._web_fallback(Capture()) is False
 
 
-class TestSession(FakeSession):
+class ReadySession(FakeSession):
     def __init__(self) -> None:
         super().__init__()
         self.headers = {"X-API-Key": "k"}
@@ -192,7 +192,7 @@ def test_connection_test_reports_both_paths(db_conn, monkeypatch) -> None:  # no
         "INSERT INTO system_state (key, value) VALUES ('connection_test_request', '{\"flight_id\": \"f\"}')"
     )
     db_conn.commit()
-    monkeypatch.setattr(worker, "browser_session", TestSession())
+    monkeypatch.setattr(worker, "browser_session", ReadySession())
     monkeypatch.setattr(worker, "_checkin_within", lambda _h: None)
     monkeypatch.setattr(safety_net, "check_flight_readiness", lambda *a, **k: [])
     submitted: list[bool] = []

@@ -16,6 +16,9 @@ export interface Reservation {
   id: string;
   account_id: string | null;
   owner_account_id?: string | null;
+  // Manual reservations: last flight lookup (worker.py process_manual_reservations)
+  lookup_status?: "ok" | "error" | "pending" | null;
+  lookup_message?: string | null;
   confirmation_number: string;
   first_name: string;
   last_name: string;
