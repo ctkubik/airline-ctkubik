@@ -3,6 +3,6 @@ apprise==1.9.4
 # 32-bit ARM, where passwords stay unencrypted.
 cryptography>=44; platform_machine != "armv7l"
 ntplib==0.4.0
-requests==2.32.3
+requests~=2.34.2
 seleniumbase==4.56.2
 tzdata>=2025.2; platform_system == "Windows"
