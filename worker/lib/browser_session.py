@@ -37,6 +37,7 @@ TRIPS_URL = (
 INVALID_CREDENTIALS_CODE = 400518024
 WAIT_TIMEOUT_SECS = 180
 SESSION_MAX_AGE = 2 * 60 * 60  # 2 hours before forced restart
+POST_LOGIN_HEADER_WAIT = 45  # seconds to wait on the mobile site after an account login
 
 logger = get_logger(__name__)
 
@@ -121,11 +122,32 @@ class BrowserSession:
         if BROWSER_MODE == "xvfb":
             self._start_display()
 
+        logger.info("Browser mode: %s", BROWSER_MODE)
+        # Newer Chrome builds sometimes close the first window while UC mode
+        # reconnects ("no such window" / "web view not found"). Try again,
+        # and the second time without incognito, which avoids the extra window.
+        last_err: Exception | None = None
+        for attempt, incognito in enumerate((True, False), start=1):
+            try:
+                self._launch(incognito)
+                self._load_mobile_site()
+                last_err = None
+                break
+            except Exception as err:  # noqa: BLE001
+                last_err = err
+                logger.warning("Browser start attempt %d failed: %s", attempt, str(err).splitlines()[0])
+                self._quit_driver()
+        if last_err is not None:
+            raise last_err
+
+        self._started_at = time.time()
+        logger.info("Browser session established with %d headers", len(self.headers))
+
+    def _launch(self, incognito: bool) -> None:
         # Docker ships a matched chromedriver; elsewhere (macOS) SeleniumBase
         # downloads the driver that matches the installed Chrome.
         driver_version = "keep" if IS_DOCKER else "mlatest"
         headed = BROWSER_MODE in ("xvfb", "headed")
-        logger.info("Browser mode: %s", BROWSER_MODE)
         self._driver = Driver(
             # CHROME_PATH: set by the macOS installer when Chrome lives in ~/Applications
             binary_location=os.environ.get("CHROME_PATH") or None,
@@ -134,8 +156,9 @@ class BrowserSession:
             headless1=not headed,
             uc_cdp_events=True,
             undetectable=True,
-            incognito=True,
+            incognito=incognito,
         )
+        self._use_live_window()
         self._driver.set_script_timeout(60)
         logger.info("Browser version: %s", self._driver.caps.get("browserVersion", "unknown"))
 
@@ -159,13 +182,39 @@ class BrowserSession:
         self._headers_set = False
         self._driver.add_cdp_listener("Network.requestWillBeSent", self._headers_listener)
 
-        # Navigate to mobile site to pass WAF and capture headers
-        logger.info("Loading mobile Southwest site to establish session")
-        self._driver.get(MOBILE_LOGIN_URL)
-        self._wait_for_headers()
+    def _use_live_window(self) -> None:
+        """Point the driver at a window that still exists."""
+        try:
+            handles = self._driver.window_handles
+        except Exception:  # noqa: BLE001
+            return
+        if handles:
+            try:
+                self._driver.switch_to.window(handles[-1])
+            except Exception as err:  # noqa: BLE001
+                logger.debug("Couldn't switch windows: %s", err)
 
-        self._started_at = time.time()
-        logger.info("Browser session established with %d headers", len(self.headers))
+    def _load_mobile_site(self, timeout: int = WAIT_TIMEOUT_SECS) -> None:
+        """Open the mobile site and wait for its API headers (the WAF session)."""
+        logger.info("Loading mobile Southwest site to establish session")
+        self._headers_set = False
+        try:
+            self._driver.get(MOBILE_LOGIN_URL)
+        except Exception as err:  # noqa: BLE001
+            if "no such window" not in str(err).lower() and "web view not found" not in str(err).lower():
+                raise
+            logger.warning("Browser window went away; switching to the open one and retrying")
+            self._use_live_window()
+            self._driver.get(MOBILE_LOGIN_URL)
+        self._wait_for_attribute("_headers_set", timeout=timeout)
+
+    def _quit_driver(self) -> None:
+        if self._driver:
+            try:
+                self._driver.quit()
+            except Exception:  # noqa: BLE001
+                pass
+            self._driver = None
 
     def stop(self) -> None:
         """Quit browser and stop display."""
@@ -366,22 +415,35 @@ class BrowserSession:
             trips_response = self._get_response_body(self._trips_request_id)
             reservations = trips_response.get("data", [])
 
-            # Navigate back to mobile site to re-establish API session
+            # Back to the mobile site to re-establish the API session. Signed
+            # in, the mobile site may not make the request the headers come
+            # from; if nothing arrives soon, a fresh browser always works.
             logger.info("Navigating back to mobile site after login")
-            self._headers_set = False
-            self._driver.get(MOBILE_LOGIN_URL)
-            self._wait_for_headers()
-
-            self._started_at = time.time()
+            try:
+                self._load_mobile_site(timeout=POST_LOGIN_HEADER_WAIT)
+                self._started_at = time.time()
+            except Exception as err:  # noqa: BLE001
+                logger.info("Mobile site didn't hand over a session after login (%s); restarting the browser", err)
+                self._start_internal()
             logger.info("Session re-established after login with %d headers", len(self.headers))
 
             return reservations, first_name, last_name
 
     def _headers_listener(self, data: JSON) -> None:
         request = data["params"]["request"]
-        if request["url"] == MOBILE_HEADERS_URL:
+        url = request["url"]
+        if url == MOBILE_HEADERS_URL:
             self.headers = self._get_needed_headers(request["headers"])
             self._headers_set = True
+        elif not self._headers_set and url.startswith(API_BASE_URL):
+            # Any other mobile API call carrying the API key and the bot-check
+            # headers works too, in case Southwest stops making the one above
+            needed = self._get_needed_headers(request["headers"])
+            names = {h.lower() for h in needed}
+            waf = [h for h in names if re.match(r"^[\w-]+?-\w$", h) and h not in ("x-api-key", "x-channel-id")]
+            if "x-api-key" in names and waf:
+                self.headers = needed
+                self._headers_set = True
 
     def _login_listener(self, data: JSON) -> None:
         response = data["params"]["response"]

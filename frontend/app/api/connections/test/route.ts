@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getSetting } from "@/lib/settings";
+import { normalizeLlmUrl } from "@/lib/llm";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ const LM_AUTH_HELP =
   "Developer tab (Server Settings), or create a token there and paste it in the API token field.";
 
 async function testLmStudio(baseUrl: string, model: string, token: string) {
-  const base = baseUrl.replace(/\/+$/, "");
+  const base = normalizeLlmUrl(baseUrl);
   const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   let res: Response;
   try {

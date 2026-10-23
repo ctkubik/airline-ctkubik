@@ -84,6 +84,11 @@ export function saveSetting(name: string, value: string, by: string): string | n
     }
   }
   if (v.length > 500 || /[\r\n]/.test(v)) return `${name} doesn't look right`;
+  if (name === "LLM_BASE_URL") {
+    // Save it with /v1 so the worker and dashboard agree
+    const u = new URL(v);
+    if (u.pathname === "" || u.pathname === "/") return saveSetting(name, `${v.replace(/\/+$/, "")}/v1`, by);
+  }
   db.prepare(
     "INSERT INTO app_settings (key, value, updated_by, updated_at) VALUES (?, ?, ?, datetime('now')) " +
       "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at"

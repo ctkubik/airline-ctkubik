@@ -118,3 +118,10 @@ def test_chat_json(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_bad_timeout_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_TIMEOUT", "soon")
     assert LLMClient().timeout == 60.0
+
+
+def test_base_url_gets_v1() -> None:
+    assert llm.normalize_base_url("http://localhost:1234") == "http://localhost:1234/v1"
+    assert llm.normalize_base_url("http://localhost:1234/") == "http://localhost:1234/v1"
+    assert llm.normalize_base_url("http://localhost:1234/v1/") == "http://localhost:1234/v1"
+    assert llm.normalize_base_url("http://studio.local:8080/api/v1") == "http://studio.local:8080/api/v1"

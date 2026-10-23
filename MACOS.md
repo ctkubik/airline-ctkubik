@@ -203,6 +203,10 @@ needs Rosetta. Run the installer again and enter your password, or run
 update Chrome (Chrome menu > About Google Chrome), then `./macos/ctl.sh restart`. The worker
 downloads a matching driver automatically.
 
+**Worker log shows "no such window" or "web view not found" when the browser starts.** Chrome
+updated past what the automation library knew. Run the installer again to get the current version;
+the app also retries by itself, the second time without an incognito window.
+
 **Nothing runs after a restart.** Automatic login isn't on (see [Make the Mac start up on its own](#make-the-mac-start-up-on-its-own)), so the services are waiting
 for someone to log in.
 

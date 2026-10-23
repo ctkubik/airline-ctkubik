@@ -13,8 +13,22 @@ export function llmEnabled(): boolean {
   return settingOn("LLM_ENABLED");
 }
 
+// "http://localhost:1234" -> "http://localhost:1234/v1": the OpenAI-style
+// endpoints live under /v1, and an address without it gets LM Studio's
+// "Unexpected endpoint" reply (an empty model list).
+export function normalizeLlmUrl(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  try {
+    const u = new URL(trimmed);
+    if (u.pathname === "" || u.pathname === "/") return `${trimmed}/v1`;
+  } catch {
+    // not a URL; leave it for the caller to report
+  }
+  return trimmed;
+}
+
 function baseUrl(): string {
-  return (getSetting("LLM_BASE_URL") || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  return normalizeLlmUrl(getSetting("LLM_BASE_URL") || DEFAULT_BASE_URL);
 }
 
 // LM Studio's "Require authentication" server setting

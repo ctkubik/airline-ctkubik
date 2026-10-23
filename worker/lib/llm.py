@@ -21,6 +21,7 @@ import json
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -33,6 +34,17 @@ JSON_T = dict[str, Any]
 DEFAULT_BASE_URL = "http://localhost:1234/v1"
 
 
+def normalize_base_url(url: str) -> str:
+    """'http://localhost:1234' -> 'http://localhost:1234/v1'.
+
+    LM Studio's OpenAI-style API lives under /v1.
+    """
+    url = url.strip().rstrip("/")
+    if urlparse(url).path in ("", "/"):
+        return f"{url}/v1"
+    return url
+
+
 class LLMClient:
     def __init__(self) -> None:
         self.enabled = os.environ.get("LLM_ENABLED", "").strip().lower() in (
@@ -41,7 +53,7 @@ class LLMClient:
             "yes",
             "on",
         )
-        self.base_url = os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+        self.base_url = normalize_base_url(os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL))
         self.model = os.environ.get("LLM_MODEL", "").strip()
         # LM Studio's "Require authentication" server setting: a token is
         # sent as "Authorization: Bearer <token>"
